@@ -1,10 +1,10 @@
 export interface DomNode {
+  nodeId: number;
   tag: string;
   id?: string;
   classes?: string[];
   attrs?: Record<string, string>;
   text?: string;
-  path: number[];
   childCount: number;
   children: DomNode[];
 }
@@ -38,7 +38,7 @@ export interface ClientInfo {
 }
 
 export interface HighlightPayload {
-  path: number[];
+  nodeId: number;
   tabId: number;
   url: string;
   extensionId?: string;

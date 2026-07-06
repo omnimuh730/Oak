@@ -12,7 +12,7 @@ export default function App() {
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [latestTree, setLatestTree] = useState<DomTreeMessage | null>(null);
   const [history, setHistory] = useState<DomTreeMessage[]>([]);
-  const [selectedPath, setSelectedPath] = useState<number[] | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -28,7 +28,7 @@ export default function App() {
     socket.on('connected', (data: { clients: ClientInfo[] }) => setClients(data.clients));
     socket.on('dom:tree', (payload: DomTreeMessage) => {
       setLatestTree(payload);
-      setSelectedPath(null);
+      setSelectedNodeId(null);
       setHistory((prev) => [payload, ...prev].slice(0, 20));
     });
 
@@ -42,10 +42,10 @@ export default function App() {
       const tabId = latestTree?.meta?.tabId ?? latestTree?.tabId;
       if (!tabId || !latestTree) return;
 
-      setSelectedPath(node.path);
+      setSelectedNodeId(node.nodeId);
 
       const payload: HighlightPayload = {
-        path: node.path,
+        nodeId: node.nodeId,
         tabId,
         url: latestTree.url,
         extensionId: latestTree.meta?.from,
@@ -122,7 +122,7 @@ export default function App() {
         {latestTree ? (
           <DomTreeView
             tree={latestTree.tree}
-            selectedPath={selectedPath}
+            selectedNodeId={selectedNodeId}
             onNodeClick={handleNodeClick}
           />
         ) : (

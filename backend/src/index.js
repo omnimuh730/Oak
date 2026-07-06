@@ -53,19 +53,19 @@ io.on('connection', (socket) => {
   });
 
   socket.on('dom:highlight', (payload) => {
-    const { extensionId, path, tabId, url } = payload ?? {};
-    if (!path || !tabId) return;
+    const { extensionId, nodeId, tabId, url } = payload ?? {};
+    if (nodeId == null || !tabId) return;
 
-    console.log(`[dom:highlight] path=[${path}] tab=${tabId}`);
+    console.log(`[dom:highlight] nodeId=${nodeId} tab=${tabId}`);
 
     if (extensionId) {
-      io.to(extensionId).emit('dom:highlight', { path, tabId, url });
+      io.to(extensionId).emit('dom:highlight', { nodeId, tabId, url });
       return;
     }
 
     for (const [id, info] of clients.entries()) {
       if (info.type === 'extension') {
-        io.to(id).emit('dom:highlight', { path, tabId, url });
+        io.to(id).emit('dom:highlight', { nodeId, tabId, url });
       }
     }
   });

@@ -3,11 +3,11 @@ import './DomTreeView.css';
 
 interface Props {
   tree: DomNode;
-  selectedPath: number[] | null;
+  selectedNodeId: number | null;
   onNodeClick: (node: DomNode) => void;
 }
 
-export function DomTreeView({ tree, selectedPath, onNodeClick }: Props) {
+export function DomTreeView({ tree, selectedNodeId, onNodeClick }: Props) {
   return (
     <div className="tree-container">
       <div className="tree-canvas">
@@ -15,7 +15,7 @@ export function DomTreeView({ tree, selectedPath, onNodeClick }: Props) {
           node={tree}
           depth={0}
           isLast
-          selectedPath={selectedPath}
+          selectedNodeId={selectedNodeId}
           onNodeClick={onNodeClick}
         />
       </div>
@@ -28,7 +28,7 @@ interface TreeNodeProps {
   depth: number;
   isLast: boolean;
   prefix?: string;
-  selectedPath: number[] | null;
+  selectedNodeId: number | null;
   onNodeClick: (node: DomNode) => void;
 }
 
@@ -37,14 +37,14 @@ function TreeNode({
   depth,
   isLast,
   prefix = '',
-  selectedPath,
+  selectedNodeId,
   onNodeClick,
 }: TreeNodeProps) {
   const hasChildren = node.children.length > 0;
   const branch = prefix + (isLast ? '└── ' : '├── ');
   const childPrefix = prefix + (isLast ? '    ' : '│   ');
   const label = formatLabel(node);
-  const isSelected = pathsEqual(selectedPath, node.path);
+  const isSelected = selectedNodeId === node.nodeId;
 
   return (
     <div className={`tree-branch depth-${Math.min(depth, 8)}`}>
@@ -69,12 +69,12 @@ function TreeNode({
       {hasChildren &&
         node.children.map((child, i) => (
           <TreeNode
-            key={`${child.path.join('-')}-${i}`}
+            key={`oak-node-${child.nodeId}`}
             node={child}
             depth={depth + 1}
             isLast={i === node.children.length - 1}
             prefix={childPrefix}
-            selectedPath={selectedPath}
+            selectedNodeId={selectedNodeId}
             onNodeClick={onNodeClick}
           />
         ))}
@@ -89,9 +89,4 @@ function formatLabel(node: DomNode): string {
   label += '>';
   if (node.text) label += ` ${node.text}`;
   return label;
-}
-
-function pathsEqual(a: number[] | null, b: number[]): boolean {
-  if (!a || a.length !== b.length) return false;
-  return a.every((v, i) => v === b[i]);
 }
