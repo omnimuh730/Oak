@@ -15,12 +15,22 @@ const SEMANTIC_TAGS = new Set([
 const STRUCTURAL_TAGS = new Set([
   'DIV', 'SPAN', 'SECTION', 'ARTICLE', 'MAIN', 'HEADER', 'FOOTER', 'NAV', 'ASIDE',
 ]);
-const MAX_DEPTH = 32;
-const MAX_CHILDREN = 120;
-const MAX_TEXT = 120;
+const MAX_DEPTH = 999;
+const MAX_CHILDREN = 9999;
+const MAX_TEXT = 999999;
 
 function tn(el: Element): string {
   return el.tagName.toUpperCase();
+}
+
+/** HELPER: Traverse into Shadow DOM if present */
+function getChildren(el: Element): Element[] {
+  return Array.from((el.shadowRoot || el).children);
+}
+
+/** HELPER: Traverse into Shadow DOM Text Nodes if present */
+function getChildNodes(el: Element): Node[] {
+  return Array.from((el.shadowRoot || el).childNodes);
 }
 
 export function serializeDom(root: Element = document.documentElement): DomNode {
@@ -48,7 +58,7 @@ function childDepth(parentDepth: number, child: Element): number {
 function hasTextDescendant(el: Element, limit = 8): boolean {
   if (limit <= 0) return false;
   if (hasMeaningfulText(el)) return true;
-  for (const child of el.children) {
+  for (const child of getChildren(el)) {
     if (SKIP_TAGS.has(tn(child)) || MEDIA_TAGS.has(tn(child))) continue;
     if (hasTextDescendant(child, limit - 1)) return true;
   }
@@ -58,7 +68,7 @@ function hasTextDescendant(el: Element, limit = 8): boolean {
 function hasInteractiveDescendant(el: Element, limit = 8): boolean {
   if (limit <= 0) return false;
   if (isInteractive(el)) return true;
-  for (const child of el.children) {
+  for (const child of getChildren(el)) {
     if (SKIP_TAGS.has(tn(child)) || MEDIA_TAGS.has(tn(child))) continue;
     if (hasInteractiveDescendant(child, limit - 1)) return true;
   }
@@ -88,7 +98,7 @@ export function getIncludedChildren(el: Element): Element[] {
 }
 
 function getRelevantChildren(el: Element): Element[] {
-  return Array.from(el.children).filter((c) => !shouldOmitElement(c, 1));
+  return getChildren(el).filter((c) => !shouldOmitElement(c, 1));
 }
 
 function isInteractive(el: Element): boolean {
@@ -131,14 +141,14 @@ function shouldOmitElement(el: Element, depth: number): boolean {
 }
 
 function hasMeaningfulText(el: Element): boolean {
-  return Array.from(el.childNodes).some(
+  return getChildNodes(el).some(
     (n) => n.nodeType === Node.TEXT_NODE && (n.textContent?.trim().length ?? 0) > 0,
   );
 }
 
-function getDirectText(el: Element): string | undefined {
+export function getDirectText(el: Element): string | undefined {
   const parts: string[] = [];
-  for (const node of el.childNodes) {
+  for (const node of getChildNodes(el)) {
     if (node.nodeType === Node.TEXT_NODE) {
       const t = node.textContent?.trim();
       if (t) parts.push(t);
@@ -157,7 +167,7 @@ function getDisplayText(el: Element): string | undefined {
   if (!STRUCTURAL_TAGS.has(tag) && !SEMANTIC_TAGS.has(tag)) return undefined;
 
   const parts: string[] = [];
-  for (const child of el.children) {
+  for (const child of getChildren(el)) {
     if (MEDIA_TAGS.has(tn(child))) continue;
     const t = getDirectText(child);
     if (t) parts.push(t);
@@ -183,7 +193,7 @@ function serializeNode(el: Element, depth: number, path: number[]): DomNode | nu
   const text = depth > 0 ? getDisplayText(el) : undefined;
 
   const children: DomNode[] = [];
-  const rawChildEls = Array.from(el.children).filter((c) => !shouldOmitElement(c, depth + 1));
+  const rawChildEls = getChildren(el).filter((c) => !shouldOmitElement(c, depth + 1));
 
   if (depth < MAX_DEPTH) {
     let serialIndex = 0;
@@ -207,7 +217,7 @@ function serializeNode(el: Element, depth: number, path: number[]): DomNode | nu
     attrs: Object.keys(attrs).length ? attrs : undefined,
     text,
     path,
-    childCount: el.children.length,
+    childCount: getChildren(el).length,
     children,
   };
 }

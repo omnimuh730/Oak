@@ -1,20 +1,8 @@
 import { MSG } from '../types';
-import { serializeDom } from './dom-serializer';
+import { serializeDom, getDirectText } from './dom-serializer';
 import { resolveElementByPath } from './element-resolver';
 import { clearHighlight, highlightElement } from './highlighter';
 import { injectOakUI } from './inject-ui';
-
-function getDirectText(el: Element): string | undefined {
-  const parts: string[] = [];
-  for (const node of el.childNodes) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const t = node.textContent?.trim();
-      if (t) parts.push(t);
-    }
-  }
-  if (parts.length === 0) return undefined;
-  return parts.join(' ').slice(0, 120);
-}
 
 injectOakUI();
 
