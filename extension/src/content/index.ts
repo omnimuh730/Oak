@@ -7,8 +7,16 @@ import { injectOakUI } from './inject-ui';
 
 injectOakUI();
 
+/** Only the top frame or Greenhouse embed frames own the page DOM for Oak. */
+function isOakDomFrame(): boolean {
+  if (window === window.top) return true;
+  return location.hostname.endsWith('greenhouse.io');
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === MSG.FETCH_DOM) {
+    if (!isOakDomFrame()) return;
+
     try {
       const tree = serializeDom();
       sendResponse({
@@ -24,6 +32,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === MSG.HIGHLIGHT) {
+    if (!isOakDomFrame()) return;
+
     try {
       const el = resolveElementByNodeId(message.nodeId as number);
       if (el) {
@@ -40,6 +50,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === MSG.GET_CONTENT) {
+    if (!isOakDomFrame()) return;
+
     try {
       const content = getElementContent(
         message.nodeId as number,
@@ -53,6 +65,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === MSG.EXECUTE_ACTIONS) {
+    if (!isOakDomFrame()) return;
+
     executeActions(message.nodeId as number, message.steps)
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ error: String(err) }));
@@ -60,6 +74,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === MSG.CLEAR_HIGHLIGHT) {
+    if (!isOakDomFrame()) return;
+
     clearHighlight();
     sendResponse({ ok: true });
     return true;

@@ -44,16 +44,24 @@ function getChildNodes(el: Element): Node[] {
   return Array.from((el.shadowRoot || el).childNodes);
 }
 
-export function serializeDom(root: Element = document.documentElement): DomNode {
+export function serializeDom(root?: Element): DomNode {
   oakIdCounter = 0;
-  
+
   // Clean up old Oak IDs across the whole document (including iframes)
   document.querySelectorAll('[data-oak-id]').forEach(el => el.removeAttribute('data-oak-id'));
 
-  const nodes = serializeNode(root, 0);
-  if (!nodes || nodes.length === 0) throw new Error('Root element was completely pruned');
-  
-  return nodes[0];
+  const candidates = [
+    root,
+    document.body,
+    document.documentElement,
+  ].filter((el): el is Element => el != null);
+
+  for (const candidate of candidates) {
+    const nodes = serializeNode(candidate, 0);
+    if (nodes && nodes.length > 0) return nodes[0];
+  }
+
+  throw new Error('Root element was completely pruned');
 }
 
 function isInteractive(el: Element): boolean {

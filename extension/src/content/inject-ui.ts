@@ -2,13 +2,28 @@ import { MSG } from '../types';
 
 const HOST_ID = 'oak-extension-host';
 
-export function injectOakUI(): void {
-  if (document.getElementById(HOST_ID)) return;
+let persistObserver: MutationObserver | null = null;
+
+function shouldShowUI(): boolean {
+  const isGreenhouse = location.hostname.endsWith('greenhouse.io');
+  return window === window.top || isGreenhouse;
+}
+
+function mountTarget(): HTMLElement | null {
+  return document.body;
+}
+
+function mountOakUI(): void {
+  if (!shouldShowUI() || document.getElementById(HOST_ID)) return;
+
+  const target = mountTarget();
+  if (!target) return;
 
   const host = document.createElement('div');
   host.id = HOST_ID;
-  host.style.cssText = 'all: initial; position: fixed; z-index: 2147483646;';
-  document.documentElement.appendChild(host);
+  host.setAttribute('data-oak-ui', 'true');
+  host.style.cssText = 'all: initial; position: fixed; inset: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none;';
+  target.appendChild(host);
 
   const shadow = host.attachShadow({ mode: 'open' });
 
@@ -58,18 +73,43 @@ export function injectOakUI(): void {
   });
 }
 
+function ensureOakUI(): void {
+  mountOakUI();
+
+  if (persistObserver) return;
+
+  persistObserver = new MutationObserver(() => {
+    if (!document.getElementById(HOST_ID) && shouldShowUI()) {
+      mountOakUI();
+    }
+  });
+
+  const root = document.documentElement;
+  persistObserver.observe(root, { childList: true, subtree: true });
+}
+
+export function injectOakUI(): void {
+  if (mountTarget()) {
+    ensureOakUI();
+    return;
+  }
+
+  document.addEventListener('DOMContentLoaded', ensureOakUI, { once: true });
+}
+
 const STYLES = `
   :host, * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 
   .oak-fab {
     position: fixed;
-    bottom: 24px;
-    right: 24px;
+    bottom: 36px;
+    left: 24px;
     width: 52px;
     height: 52px;
     border-radius: 50%;
     border: none;
     cursor: pointer;
+    pointer-events: auto;
     background: linear-gradient(135deg, #7c6cf0, #5b4cdb);
     box-shadow: 0 4px 20px rgba(124, 108, 240, 0.45), 0 2px 8px rgba(0,0,0,0.2);
     display: flex;
@@ -94,6 +134,7 @@ const STYLES = `
     right: 0;
     width: 400px;
     height: 100vh;
+    pointer-events: auto;
     background: #1a1d27;
     box-shadow: -4px 0 32px rgba(0,0,0,0.35);
     transform: translateX(100%);
