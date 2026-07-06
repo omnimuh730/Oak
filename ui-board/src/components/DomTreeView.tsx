@@ -5,9 +5,10 @@ interface Props {
   tree: DomNode;
   selectedNodeId: number | null;
   onNodeClick: (node: DomNode) => void;
+  onNodeContextMenu: (node: DomNode, x: number, y: number) => void;
 }
 
-export function DomTreeView({ tree, selectedNodeId, onNodeClick }: Props) {
+export function DomTreeView({ tree, selectedNodeId, onNodeClick, onNodeContextMenu }: Props) {
   return (
     <div className="tree-container">
       <div className="tree-canvas">
@@ -17,6 +18,7 @@ export function DomTreeView({ tree, selectedNodeId, onNodeClick }: Props) {
           isLast
           selectedNodeId={selectedNodeId}
           onNodeClick={onNodeClick}
+          onNodeContextMenu={onNodeContextMenu}
         />
       </div>
     </div>
@@ -30,6 +32,7 @@ interface TreeNodeProps {
   prefix?: string;
   selectedNodeId: number | null;
   onNodeClick: (node: DomNode) => void;
+  onNodeContextMenu: (node: DomNode, x: number, y: number) => void;
 }
 
 function TreeNode({
@@ -39,6 +42,7 @@ function TreeNode({
   prefix = '',
   selectedNodeId,
   onNodeClick,
+  onNodeContextMenu,
 }: TreeNodeProps) {
   const hasChildren = node.children.length > 0;
   const branch = prefix + (isLast ? '└── ' : '├── ');
@@ -55,6 +59,10 @@ function TreeNode({
           className={`node-card ${isSelected ? 'selected' : ''}`}
           title={label}
           onClick={() => onNodeClick(node)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onNodeContextMenu(node, e.clientX, e.clientY);
+          }}
         >
           <span className="tag">{node.tag}</span>
           {node.id && <span className="node-id">#{node.id}</span>}
@@ -76,6 +84,7 @@ function TreeNode({
             prefix={childPrefix}
             selectedNodeId={selectedNodeId}
             onNodeClick={onNodeClick}
+            onNodeContextMenu={onNodeContextMenu}
           />
         ))}
     </div>

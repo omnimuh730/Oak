@@ -70,6 +70,14 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('dom:get-content', (payload, ack) => {
+    relayToExtension(payload, 'dom:get-content', ack);
+  });
+
+  socket.on('dom:execute-actions', (payload, ack) => {
+    relayToExtension(payload, 'dom:execute-actions', ack, 60000);
+  });
+
   socket.on('disconnect', () => {
     clients.delete(socket.id);
     console.log(`[${type}] disconnected: ${name} (${socket.id})`);
@@ -79,6 +87,41 @@ io.on('connection', (socket) => {
 
 function getClientSummary() {
   return Array.from(clients.entries()).map(([id, info]) => ({ id, ...info }));
+}
+
+function relayToExtension(payload, event, ack, timeoutMs = 15000) {
+  const { extensionId, nodeId, tabId } = payload ?? {};
+  if (nodeId == null || !tabId) {
+    ack?.({ error: 'Missing nodeId or tabId' });
+    return;
+  }
+
+  const targetId = extensionId ?? findExtensionSocketId();
+  if (!targetId) {
+    ack?.({ error: 'No extension connected' });
+    return;
+  }
+
+  const extSocket = io.sockets.sockets.get(targetId);
+  if (!extSocket) {
+    ack?.({ error: 'Extension socket not found' });
+    return;
+  }
+
+  extSocket.timeout(timeoutMs).emit(event, payload, (err, res) => {
+    if (err) {
+      ack?.({ error: err.message ?? 'Extension request timed out' });
+      return;
+    }
+    ack?.(res ?? { error: 'No response from extension' });
+  });
+}
+
+function findExtensionSocketId() {
+  for (const [id, info] of clients.entries()) {
+    if (info.type === 'extension') return id;
+  }
+  return null;
 }
 
 function countNodes(node) {

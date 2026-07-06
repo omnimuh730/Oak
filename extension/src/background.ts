@@ -1,5 +1,12 @@
 import { io, Socket } from 'socket.io-client';
-import { DEFAULT_SERVER, MSG, type DomTreePayload, type HighlightPayload } from './types';
+import {
+  DEFAULT_SERVER,
+  MSG,
+  type DomTreePayload,
+  type ExecuteActionsPayload,
+  type GetContentPayload,
+  type HighlightPayload,
+} from './types';
 
 let socket: Socket | null = null;
 let socketConnected = false;
@@ -30,13 +37,53 @@ function connectSocket(serverUrl: string) {
 
   socket.on('dom:highlight', async (payload: HighlightPayload) => {
     const { tabId, nodeId } = payload;
-    if (!tabId || !nodeId) return;
+    if (!tabId || nodeId == null) return;
 
     try {
       await chrome.tabs.sendMessage(tabId, { type: MSG.HIGHLIGHT, nodeId });
     } catch (err) {
       console.warn('[Oak] highlight failed:', err);
     }
+  });
+
+  socket.on('dom:get-content', (payload: GetContentPayload, ack?: (res: unknown) => void) => {
+    const { tabId, nodeId, contentType } = payload;
+    if (!tabId || nodeId == null || !contentType) {
+      ack?.({ error: 'Invalid payload' });
+      return;
+    }
+
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: MSG.GET_CONTENT, nodeId, contentType },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          ack?.({ error: chrome.runtime.lastError.message });
+          return;
+        }
+        ack?.(res);
+      },
+    );
+  });
+
+  socket.on('dom:execute-actions', (payload: ExecuteActionsPayload, ack?: (res: unknown) => void) => {
+    const { tabId, nodeId, steps } = payload;
+    if (!tabId || nodeId == null || !steps?.length) {
+      ack?.({ error: 'Invalid payload' });
+      return;
+    }
+
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: MSG.EXECUTE_ACTIONS, nodeId, steps },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          ack?.({ error: chrome.runtime.lastError.message });
+          return;
+        }
+        ack?.(res);
+      },
+    );
   });
 }
 

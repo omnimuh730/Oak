@@ -1,6 +1,7 @@
 import { MSG } from '../types';
 import { serializeDom, getDirectText } from './dom-serializer';
 import { resolveElementByNodeId } from './element-resolver';
+import { executeActions, getElementContent } from './action-runner';
 import { clearHighlight, highlightElement } from './highlighter';
 import { injectOakUI } from './inject-ui';
 
@@ -35,6 +36,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     } catch (err) {
       sendResponse({ error: String(err) });
     }
+    return true;
+  }
+
+  if (message.type === MSG.GET_CONTENT) {
+    try {
+      const content = getElementContent(
+        message.nodeId as number,
+        message.contentType as 'innerHTML' | 'innerText',
+      );
+      sendResponse({ ok: true, content });
+    } catch (err) {
+      sendResponse({ error: String(err) });
+    }
+    return true;
+  }
+
+  if (message.type === MSG.EXECUTE_ACTIONS) {
+    executeActions(message.nodeId as number, message.steps)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ error: String(err) }));
     return true;
   }
 

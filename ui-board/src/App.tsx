@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import type { ActionStep } from './automation-types';
 import type { ClientInfo, DomNode, DomTreeMessage, HighlightPayload } from './types';
+import { ActionBuilderModal } from './components/ActionBuilderModal';
+import { ContentModal } from './components/ContentModal';
+import { ContextMenu, type ContextMenuState } from './components/ContextMenu';
 import { DomTreeView } from './components/DomTreeView';
 import './App.css';
 
@@ -13,6 +17,12 @@ export default function App() {
   const [latestTree, setLatestTree] = useState<DomTreeMessage | null>(null);
   const [history, setHistory] = useState<DomTreeMessage[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [contextNode, setContextNode] = useState<DomNode | null>(null);
+  const [contentModal, setContentModal] = useState<{ title: string; content: string } | null>(null);
+  const [actionModalNode, setActionModalNode] = useState<DomNode | null>(null);
+  const [actionRunning, setActionRunning] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -37,24 +47,116 @@ export default function App() {
     };
   }, [serverUrl]);
 
-  const handleNodeClick = useCallback(
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const getTarget = useCallback(
     (node: DomNode) => {
       const tabId = latestTree?.meta?.tabId ?? latestTree?.tabId;
-      if (!tabId || !latestTree) return;
-
-      setSelectedNodeId(node.nodeId);
-
-      const payload: HighlightPayload = {
+      if (!tabId || !latestTree) return null;
+      return {
         nodeId: node.nodeId,
         tabId,
         url: latestTree.url,
         extensionId: latestTree.meta?.from,
       };
-
-      socketRef.current?.emit('dom:highlight', payload);
     },
     [latestTree],
   );
+
+  const handleNodeClick = useCallback(
+    (node: DomNode) => {
+      const target = getTarget(node);
+      if (!target) return;
+
+      setSelectedNodeId(node.nodeId);
+      socketRef.current?.emit('dom:highlight', target satisfies HighlightPayload);
+    },
+    [getTarget],
+  );
+
+  const handleNodeContextMenu = useCallback((node: DomNode, x: number, y: number) => {
+    setContextNode(node);
+    setSelectedNodeId(node.nodeId);
+    setContextMenu({ x, y, nodeLabel: formatNodeLabel(node) });
+  }, []);
+
+  const closeContextMenu = () => {
+    setContextMenu(null);
+  };
+
+  const fetchContent = (contentType: 'innerHTML' | 'innerText') => {
+    if (!contextNode) return;
+    const target = getTarget(contextNode);
+    if (!target) {
+      showToast('No active page session');
+      return;
+    }
+
+    closeContextMenu();
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    socket.timeout(15000).emit(
+      'dom:get-content',
+      { ...target, contentType },
+      (err: Error | null, res: { content?: string; error?: string }) => {
+        if (err) {
+          showToast(err.message ?? 'Request failed');
+          return;
+        }
+        if (res?.error) {
+          showToast(res.error);
+          return;
+        }
+        setContentModal({
+          title: contentType === 'innerHTML' ? 'Inner HTML' : 'Inner Text',
+          content: res?.content ?? '',
+        });
+      },
+    );
+  };
+
+  const runActions = (steps: ActionStep[]) => {
+    if (!actionModalNode) return;
+    const target = getTarget(actionModalNode);
+    if (!target) {
+      showToast('No active page session');
+      return;
+    }
+
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    setActionRunning(true);
+    const totalWait = steps
+      .filter((s) => s.type === 'wait')
+      .reduce((sum, s) => sum + (s.ms ?? 0), 0);
+    const timeout = Math.max(15000, totalWait + 10000);
+
+    socket.timeout(timeout).emit(
+      'dom:execute-actions',
+      {
+        ...target,
+        steps: steps.map(({ type, text, ms, key }) => ({ type, text, ms, key })),
+      },
+      (err: Error | null, res: { ok?: boolean; error?: string }) => {
+        setActionRunning(false);
+        if (err) {
+          showToast(err.message ?? 'Action failed');
+          return;
+        }
+        if (res?.error) {
+          showToast(res.error);
+          return;
+        }
+        showToast('Actions completed');
+        setActionModalNode(null);
+      },
+    );
+  };
 
   const nodeCount = latestTree?.meta?.nodeCount ?? countNodes(latestTree?.tree);
 
@@ -124,6 +226,7 @@ export default function App() {
             tree={latestTree.tree}
             selectedNodeId={selectedNodeId}
             onNodeClick={handleNodeClick}
+            onNodeContextMenu={handleNodeContextMenu}
           />
         ) : (
           <div className="empty-state">
@@ -158,8 +261,46 @@ export default function App() {
           </ul>
         </aside>
       )}
+
+      <ContextMenu
+        menu={contextMenu}
+        onClose={closeContextMenu}
+        onGetInnerHtml={() => fetchContent('innerHTML')}
+        onGetInnerText={() => fetchContent('innerText')}
+        onAction={() => {
+          closeContextMenu();
+          if (contextNode) setActionModalNode(contextNode);
+        }}
+      />
+
+      {contentModal && (
+        <ContentModal
+          title={contentModal.title}
+          content={contentModal.content}
+          onClose={() => setContentModal(null)}
+        />
+      )}
+
+      {actionModalNode && (
+        <ActionBuilderModal
+          nodeLabel={formatNodeLabel(actionModalNode)}
+          running={actionRunning}
+          onClose={() => !actionRunning && setActionModalNode(null)}
+          onRun={runActions}
+        />
+      )}
+
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
+}
+
+function formatNodeLabel(node: DomNode): string {
+  let label = `<${node.tag}`;
+  if (node.id) label += `#${node.id}`;
+  if (node.classes?.length) label += `.${node.classes[0]}`;
+  label += '>';
+  return label;
 }
 
 function countNodes(node: DomTreeMessage['tree'] | undefined): number {
