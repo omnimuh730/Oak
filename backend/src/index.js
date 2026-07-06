@@ -41,6 +41,7 @@ io.on('connection', (socket) => {
       clientName: name,
       url: payload?.url ?? 'unknown',
       title: payload?.title ?? 'unknown',
+      tabId: payload?.tabId ?? null,
       timestamp: Date.now(),
       nodeCount: countNodes(payload?.tree),
     };
@@ -49,6 +50,24 @@ io.on('connection', (socket) => {
 
     socket.broadcast.emit('dom:tree', { ...payload, meta });
     socket.emit('dom:tree:sent', meta);
+  });
+
+  socket.on('dom:highlight', (payload) => {
+    const { extensionId, path, tabId, url } = payload ?? {};
+    if (!path || !tabId) return;
+
+    console.log(`[dom:highlight] path=[${path}] tab=${tabId}`);
+
+    if (extensionId) {
+      io.to(extensionId).emit('dom:highlight', { path, tabId, url });
+      return;
+    }
+
+    for (const [id, info] of clients.entries()) {
+      if (info.type === 'extension') {
+        io.to(id).emit('dom:highlight', { path, tabId, url });
+      }
+    }
   });
 
   socket.on('disconnect', () => {

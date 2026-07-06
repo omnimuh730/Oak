@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { ClientInfo, DomTreeMessage } from './types';
+import type { ClientInfo, DomNode, DomTreeMessage, HighlightPayload } from './types';
 import { DomTreeView } from './components/DomTreeView';
 import './App.css';
 
@@ -12,6 +12,7 @@ export default function App() {
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [latestTree, setLatestTree] = useState<DomTreeMessage | null>(null);
   const [history, setHistory] = useState<DomTreeMessage[]>([]);
+  const [selectedPath, setSelectedPath] = useState<number[] | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
@@ -27,6 +28,7 @@ export default function App() {
     socket.on('connected', (data: { clients: ClientInfo[] }) => setClients(data.clients));
     socket.on('dom:tree', (payload: DomTreeMessage) => {
       setLatestTree(payload);
+      setSelectedPath(null);
       setHistory((prev) => [payload, ...prev].slice(0, 20));
     });
 
@@ -34,6 +36,25 @@ export default function App() {
       socket.disconnect();
     };
   }, [serverUrl]);
+
+  const handleNodeClick = useCallback(
+    (node: DomNode) => {
+      const tabId = latestTree?.meta?.tabId ?? latestTree?.tabId;
+      if (!tabId || !latestTree) return;
+
+      setSelectedPath(node.path);
+
+      const payload: HighlightPayload = {
+        path: node.path,
+        tabId,
+        url: latestTree.url,
+        extensionId: latestTree.meta?.from,
+      };
+
+      socketRef.current?.emit('dom:highlight', payload);
+    },
+    [latestTree],
+  );
 
   const nodeCount = latestTree?.meta?.nodeCount ?? countNodes(latestTree?.tree);
 
@@ -99,7 +120,11 @@ export default function App() {
 
       <main className="main">
         {latestTree ? (
-          <DomTreeView tree={latestTree.tree} />
+          <DomTreeView
+            tree={latestTree.tree}
+            selectedPath={selectedPath}
+            onNodeClick={handleNodeClick}
+          />
         ) : (
           <div className="empty-state">
             <div className="empty-icon">⬡</div>

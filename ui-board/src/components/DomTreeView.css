@@ -42,11 +42,19 @@
   border: 1.5px solid var(--border);
   border-radius: 8px;
   color: var(--text);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  cursor: pointer;
+  text-align: left;
 }
 
 .node-card:hover {
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.node-card.selected {
+  border-color: var(--accent);
+  background: rgba(124, 108, 240, 0.15);
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
 

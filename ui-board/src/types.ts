@@ -4,6 +4,7 @@ export interface DomNode {
   classes?: string[];
   attrs?: Record<string, string>;
   text?: string;
+  path: number[];
   childCount: number;
   children: DomNode[];
 }
@@ -13,6 +14,7 @@ export interface DomTreePayload {
   title: string;
   tree: DomNode;
   fetchedAt: string;
+  tabId?: number;
 }
 
 export interface DomTreeMessage extends DomTreePayload {
@@ -22,6 +24,7 @@ export interface DomTreeMessage extends DomTreePayload {
     clientName: string;
     url: string;
     title: string;
+    tabId: number | null;
     timestamp: number;
     nodeCount: number;
   };
@@ -32,4 +35,11 @@ export interface ClientInfo {
   type: string;
   name: string;
   connectedAt: number;
+}
+
+export interface HighlightPayload {
+  path: number[];
+  tabId: number;
+  url: string;
+  extensionId?: string;
 }

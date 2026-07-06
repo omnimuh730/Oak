@@ -1,7 +1,22 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
-import { DEFAULT_SERVER, MSG, type DomTreePayload } from '../types';
+import { useCallback, useEffect, useState } from 'react';
+import { DEFAULT_SERVER, MSG, type DomNode, type DomTreePayload } from '../types';
 import './SidebarApp.css';
+
+function sendMessage<T>(message: unknown): Promise<T> {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response as T);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
 
 export default function SidebarApp() {
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
@@ -9,36 +24,35 @@ export default function SidebarApp() {
   const [fetching, setFetching] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [lastFetch, setLastFetch] = useState<DomTreePayload | null>(null);
-  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     chrome.storage.local.get(['serverUrl'], (result) => {
-      if (result.serverUrl) setServerUrl(result.serverUrl);
+      if (result.serverUrl) setServerUrl(String(result.serverUrl));
     });
   }, []);
 
   useEffect(() => {
     chrome.storage.local.set({ serverUrl });
+  }, [serverUrl]);
 
-    const socket = io(serverUrl, {
-      query: { type: 'extension', name: 'Oak Extension' },
-      transports: ['websocket', 'polling'],
-    });
-    socketRef.current = socket;
+  useEffect(() => {
+    let alive = true;
 
-    socket.on('connect', () => {
-      setConnected(true);
-      setStatus('Connected to backend');
-    });
-    socket.on('disconnect', () => {
-      setConnected(false);
-      setStatus('Disconnected from backend');
-    });
-    socket.on('dom:tree:sent', (meta) => {
-      setStatus(`Sent ${meta.nodeCount} nodes to UI board`);
-    });
+    const check = async () => {
+      try {
+        const res = await sendMessage<{ connected?: boolean }>({ type: MSG.SOCKET_STATUS });
+        if (alive) setConnected(Boolean(res?.connected));
+      } catch {
+        if (alive) setConnected(false);
+      }
+    };
 
-    return () => { socket.disconnect(); };
+    check();
+    const id = setInterval(check, 3000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, [serverUrl]);
 
   const fetchDom = useCallback(async () => {
@@ -46,20 +60,25 @@ export default function SidebarApp() {
     setStatus('Fetching DOM…');
 
     try {
-      const response = await chrome.runtime.sendMessage({ type: MSG.FETCH_DOM });
+      const response = await sendMessage<DomTreePayload & { error?: string }>({
+        type: MSG.FETCH_AND_EMIT_DOM,
+      });
 
       if (response?.error) {
         setStatus(`Error: ${response.error}`);
         return;
       }
 
+      if (!isValidTree(response?.tree)) {
+        setStatus('Error: invalid DOM tree received');
+        return;
+      }
+
       const payload: DomTreePayload = response;
       setLastFetch(payload);
-
-      socketRef.current?.emit('dom:tree', payload);
-      setStatus('DOM fetched — sending to board…');
+      setStatus(`Sent ${countNodes(payload.tree)} nodes to UI board`);
     } catch (err) {
-      setStatus(`Error: ${String(err)}`);
+      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setFetching(false);
     }
@@ -70,7 +89,7 @@ export default function SidebarApp() {
   return (
     <div className="sidebar-app">
       <section className="welcome">
-        <h2>Welcome 👋</h2>
+        <h2>Welcome</h2>
         <p className="hint">Capture the current page DOM and visualize it on the Oak UI Board.</p>
       </section>
 
@@ -117,12 +136,12 @@ export default function SidebarApp() {
         </div>
       </section>
 
-      {lastFetch && (
+      {lastFetch && isValidTree(lastFetch.tree) && (
         <section className="preview">
           <h3>Last Snapshot</h3>
           <div className="preview-card">
-            <div className="preview-title">{lastFetch.title}</div>
-            <div className="preview-url">{lastFetch.url}</div>
+            <div className="preview-title">{String(lastFetch.title ?? 'Untitled')}</div>
+            <div className="preview-url">{String(lastFetch.url ?? '')}</div>
             <div className="preview-meta">
               <span>{nodeCount} nodes</span>
               <span>{new Date(lastFetch.fetchedAt).toLocaleTimeString()}</span>
@@ -141,23 +160,36 @@ export default function SidebarApp() {
   );
 }
 
-function MiniNode({ node, depth }: { node: DomTreePayload['tree']; depth: number }) {
-  if (depth > 2) return null;
+function MiniNode({ node, depth }: { node: DomNode; depth: number }) {
+  if (depth > 2 || !node) return null;
+
+  const children = Array.isArray(node.children) ? node.children : [];
+
   return (
     <div className="mini-node" style={{ paddingLeft: depth * 12 }}>
-      <span className="mini-tag">&lt;{node.tag}&gt;</span>
-      {node.children.slice(0, 3).map((c, i) => (
-        <MiniNode key={i} node={c} depth={depth + 1} />
+      <span className="mini-tag">&lt;{String(node.tag ?? 'unknown')}&gt;</span>
+      {typeof node.text === 'string' && node.text.length > 0 && (
+        <span className="mini-text"> &quot;{node.text}&quot;</span>
+      )}
+      {children.slice(0, 3).map((c, i) => (
+        <MiniNode key={`${c.path?.join('-') ?? i}`} node={c} depth={depth + 1} />
       ))}
-      {node.children.length > 3 && (
+      {children.length > 3 && (
         <div className="mini-node" style={{ paddingLeft: (depth + 1) * 12 }}>
-          <span className="mini-more">+{node.children.length - 3} more</span>
+          <span className="mini-more">+{children.length - 3} more</span>
         </div>
       )}
     </div>
   );
 }
 
-function countNodes(node: DomTreePayload['tree']): number {
+function isValidTree(node: unknown): node is DomNode {
+  if (!node || typeof node !== 'object') return false;
+  const n = node as DomNode;
+  return typeof n.tag === 'string' && Array.isArray(n.children);
+}
+
+function countNodes(node: DomNode | undefined): number {
+  if (!node || !Array.isArray(node.children)) return 0;
   return 1 + node.children.reduce((s, c) => s + countNodes(c), 0);
 }
