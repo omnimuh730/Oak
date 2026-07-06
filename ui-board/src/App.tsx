@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ActionStep } from './automation-types';
 import type { ClientInfo, DomNode, DomTreeMessage, HighlightPayload } from './types';
+import {
+  formatMetaTreePreview,
+  formatPureTreeForAnalyze,
+  formatPureTreePreview,
+  splitDomTree,
+} from './tree-export';
 import { ActionBuilderModal } from './components/ActionBuilderModal';
 import { ContentModal } from './components/ContentModal';
 import { ContextMenu, type ContextMenuState } from './components/ContextMenu';
@@ -160,6 +166,38 @@ export default function App() {
 
   const nodeCount = latestTree?.meta?.nodeCount ?? countNodes(latestTree?.tree);
 
+  const splitTrees = useMemo(() => {
+    if (!latestTree?.tree) return null;
+    return splitDomTree(latestTree.tree);
+  }, [latestTree]);
+
+  const copyForAnalyze = async () => {
+    if (!latestTree || !splitTrees) return;
+    const text = formatPureTreeForAnalyze(splitTrees.pure, {
+      title: latestTree.title || 'Untitled',
+      url: latestTree.url,
+      fetchedAt: latestTree.fetchedAt,
+    });
+    await navigator.clipboard.writeText(text);
+    showToast('Copied for analyze');
+  };
+
+  const openPureTreeModal = () => {
+    if (!splitTrees) return;
+    setContentModal({
+      title: 'Pure Tree',
+      content: formatPureTreePreview(splitTrees.pure),
+    });
+  };
+
+  const openMetaTreeModal = () => {
+    if (!splitTrees) return;
+    setContentModal({
+      title: 'Meta Tree',
+      content: formatMetaTreePreview(splitTrees.meta, splitTrees.pure),
+    });
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -215,6 +253,13 @@ export default function App() {
               <span className="meta-value">
                 {new Date(latestTree.fetchedAt).toLocaleTimeString()}
               </span>
+            </div>
+            <div className="tree-actions">
+              <button type="button" onClick={openPureTreeModal}>Pure Tree</button>
+              <button type="button" onClick={openMetaTreeModal}>Meta Tree</button>
+              <button type="button" className="primary" onClick={copyForAnalyze}>
+                Copy for Analyze
+              </button>
             </div>
           </>
         )}

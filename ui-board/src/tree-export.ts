@@ -1,0 +1,117 @@
+import type { DomNode } from './types';
+
+export interface PureNode {
+  tag: string;
+  id: number;
+  text?: string;
+  /** Input-only: key=value attrs e.g. type=file name=email */
+  detail?: string;
+  children: PureNode[];
+}
+
+export interface MetaNode {
+  id: number;
+  domId?: string;
+  classes?: string[];
+  attrs?: Record<string, string>;
+  children: MetaNode[];
+}
+
+const INPUT_ATTR_KEYS = ['type', 'name', 'placeholder', 'value', 'role'] as const;
+
+export function splitDomTree(root: DomNode): { pure: PureNode; meta: MetaNode } {
+  return {
+    pure: toPureNode(root),
+    meta: toMetaNode(root),
+  };
+}
+
+function toPureNode(node: DomNode): PureNode {
+  const pure: PureNode = {
+    tag: node.tag,
+    id: node.nodeId,
+    children: node.children.map(toPureNode),
+  };
+  if (node.text) pure.text = node.text;
+  if (node.tag === 'input' && node.attrs) {
+    const parts = INPUT_ATTR_KEYS.filter((k) => node.attrs?.[k]).map(
+      (k) => `${k}=${node.attrs![k]}`,
+    );
+    if (parts.length > 0) pure.detail = parts.join(' ');
+  }
+  return pure;
+}
+
+function toMetaNode(node: DomNode): MetaNode {
+  const meta: MetaNode = {
+    id: node.nodeId,
+    children: node.children.map(toMetaNode),
+  };
+  if (node.id) meta.domId = node.id;
+  if (node.classes?.length) meta.classes = node.classes;
+  if (node.attrs && Object.keys(node.attrs).length > 0) meta.attrs = node.attrs;
+  return meta;
+}
+
+function formatPureNodeLine(pure: PureNode): string {
+  const detailPart = pure.detail ? ` ${pure.detail}` : '';
+  const textPart = pure.text ? ` "${pure.text}"` : '';
+  return `${pure.tag}[${pure.id}]${detailPart}${textPart}`;
+}
+
+export function formatPureTreePreview(pure: PureNode, depth = 0): string {
+  const indent = '  '.repeat(depth);
+  const lines = [`${indent}${formatPureNodeLine(pure)}`];
+  for (const child of pure.children) {
+    lines.push(formatPureTreePreview(child, depth + 1));
+  }
+  return lines.join('\n');
+}
+
+/** Indented pure tree text for AI analysis (not JSON). */
+export function formatPureTreeForAnalyze(
+  pure: PureNode,
+  ctx: { title: string; url: string; fetchedAt: string },
+): string {
+  return [
+    `# DOM Tree — ${ctx.title || 'Untitled'}`,
+    `URL: ${ctx.url}`,
+    `Fetched: ${ctx.fetchedAt}`,
+    '',
+    formatPureTreePreview(pure),
+    '',
+  ].join('\n');
+}
+
+function buildPureIndex(pure: PureNode, map = new Map<number, PureNode>()): Map<number, PureNode> {
+  map.set(pure.id, pure);
+  for (const child of pure.children) buildPureIndex(child, map);
+  return map;
+}
+
+function formatMetaLine(meta: MetaNode, pureById: Map<number, PureNode>, depth: number): string {
+  const indent = '  '.repeat(depth);
+  const pure = pureById.get(meta.id);
+  const tag = pure?.tag ?? '?';
+
+  const parts: string[] = [`[${meta.id}]`, `<${tag}>`];
+  if (meta.domId) parts.push(`#${meta.domId}`);
+  if (meta.classes?.length) parts.push(`.${meta.classes.join('.')}`);
+  if (meta.attrs) {
+    const attrStr = Object.entries(meta.attrs)
+      .map(([k, v]) => `${k}="${v}"`)
+      .join(' ');
+    if (attrStr) parts.push(attrStr);
+  }
+
+  const lines = [`${indent}${parts.join(' ')}`];
+  for (const child of meta.children) {
+    lines.push(formatMetaLine(child, pureById, depth + 1));
+  }
+  return lines.join('\n');
+}
+
+export function formatMetaTreePreview(meta: MetaNode, pure: PureNode): string {
+  const pureById = buildPureIndex(pure);
+  return formatMetaLine(meta, pureById, 0);
+}

@@ -139,6 +139,40 @@
   max-width: 400px;
 }
 
+.tree-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.tree-actions button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tree-actions button:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.tree-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tree-actions button.primary:hover {
+  opacity: 0.9;
+}
+
 .main {
   grid-area: main;
   overflow: auto;
