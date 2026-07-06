@@ -4,16 +4,12 @@ import { DEFAULT_SERVER, MSG, type DomTreePayload, type HighlightPayload } from 
 let socket: Socket | null = null;
 let socketConnected = false;
 
-// Keeps the Service Worker alive to maintain the Socket connection
 const KEEP_ALIVE_ALARM = 'oak-socket-keep-alive';
 chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === KEEP_ALIVE_ALARM) {
-    // If the socket disconnected in the background but serverUrl exists, try reconnect
-    if (!socketConnected && socket) {
-      socket.connect();
-    }
+  if (alarm.name === KEEP_ALIVE_ALARM && !socketConnected && socket) {
+    socket.connect();
   }
 });
 
@@ -60,7 +56,6 @@ chrome.action.onClicked.addListener(async (tab) => {
     await chrome.tabs.sendMessage(tab.id, { type: MSG.TOGGLE_SIDEBAR });
   } catch {
     // Content script not loaded yet — reload the tab to inject it.
-    chrome.tabs.reload(tab.id);
   }
 });
 
