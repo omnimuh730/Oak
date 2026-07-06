@@ -1,10 +1,10 @@
 export interface DomNode {
+  nodeId: number; // Changed from path
   tag: string;
   id?: string;
   classes?: string[];
   attrs?: Record<string, string>;
   text?: string;
-  path: number[];
   childCount: number;
   children: DomNode[];
 }
@@ -31,7 +31,7 @@ export const MSG = {
 } as const;
 
 export interface HighlightPayload {
-  path: number[];
+  nodeId: number; // Changed from path
   tabId: number;
   url: string;
 }

@@ -29,11 +29,11 @@ function connectSocket(serverUrl: string) {
   });
 
   socket.on('dom:highlight', async (payload: HighlightPayload) => {
-    const { tabId, path } = payload;
-    if (!tabId || !path) return;
+    const { tabId, nodeId } = payload;
+    if (!tabId || !nodeId) return;
 
     try {
-      await chrome.tabs.sendMessage(tabId, { type: MSG.HIGHLIGHT, path });
+      await chrome.tabs.sendMessage(tabId, { type: MSG.HIGHLIGHT, nodeId });
     } catch (err) {
       console.warn('[Oak] highlight failed:', err);
     }

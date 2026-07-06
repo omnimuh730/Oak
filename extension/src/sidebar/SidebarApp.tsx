@@ -160,6 +160,8 @@ export default function SidebarApp() {
   );
 }
 
+// Find the MiniNode function at the bottom and replace it with this:
+
 function MiniNode({ node, depth }: { node: DomNode; depth: number }) {
   if (depth > 2 || !node) return null;
 
@@ -171,8 +173,8 @@ function MiniNode({ node, depth }: { node: DomNode; depth: number }) {
       {typeof node.text === 'string' && node.text.length > 0 && (
         <span className="mini-text"> &quot;{node.text}&quot;</span>
       )}
-      {children.slice(0, 3).map((c, i) => (
-        <MiniNode key={`${c.path?.join('-') ?? i}`} node={c} depth={depth + 1} />
+      {children.slice(0, 3).map((c) => (
+        <MiniNode key={`oak-node-${c.nodeId}`} node={c} depth={depth + 1} />
       ))}
       {children.length > 3 && (
         <div className="mini-node" style={{ paddingLeft: (depth + 1) * 12 }}>
