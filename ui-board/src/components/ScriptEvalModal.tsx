@@ -12,8 +12,8 @@ interface Props {
   onRun: () => void;
 }
 
-const PLACEHOLDER = `// Runs in extension context (bypasses page CSP on strict sites like Ashby).
-// __oak pierces same-origin iframes. Page globals (window.Foo) only work when CSP allows MAIN world.
+const PLACEHOLDER = `// Runs with DOM access. Strict CSP pages use debugger evaluation.
+// __oak pierces same-origin iframes and helps fill inputs.
 
 const input = await __oak.waitFor('[data-oak-id="248"]', 10000);
 __oak.setValue(input, 'you@example.com');
@@ -42,7 +42,7 @@ export function ScriptEvalModal({
 
         <div className="script-eval-body">
           <p className="script-eval-hint">
-            JavaScript runs unsafely with full DOM access. Strict sites (Ashby, etc.) use extension context to bypass CSP.
+            JavaScript runs unsafely with full DOM access. Strict CSP pages use debugger evaluation; close Chrome DevTools for that tab before running.
           </p>
           <textarea
             className="script-eval-input"
