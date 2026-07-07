@@ -12,6 +12,7 @@ interface Props {
   onClose: () => void;
   onGetInnerHtml: () => void;
   onGetInnerText: () => void;
+  onScriptEval: () => void;
   onAction: () => void;
 }
 
@@ -20,6 +21,7 @@ export function ContextMenu({
   onClose,
   onGetInnerHtml,
   onGetInnerText,
+  onScriptEval,
   onAction,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -52,8 +54,9 @@ export function ContextMenu({
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="context-menu-header">{menu.nodeLabel}</div>
-      <button type="button" onClick={onGetInnerHtml}>Get Inner HTML</button>
+      <button type="button" onClick={onGetInnerHtml}>Get Element HTML</button>
       <button type="button" onClick={onGetInnerText}>Get Inner Text</button>
+      <button type="button" onClick={onScriptEval}>Script Eval…</button>
       <button type="button" onClick={onAction}>Action…</button>
     </div>
   );

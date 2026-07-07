@@ -13,7 +13,7 @@ function isOakDomFrame(): boolean {
   return location.hostname.endsWith('greenhouse.io');
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.FETCH_DOM) {
     if (!isOakDomFrame()) return;
 
@@ -24,6 +24,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         title: document.title,
         tree,
         fetchedAt: new Date().toISOString(),
+        frameId: sender.frameId,
       });
     } catch (err) {
       sendResponse({ error: String(err) });

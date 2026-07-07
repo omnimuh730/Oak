@@ -12,6 +12,7 @@ import { ActionBuilderModal } from './components/ActionBuilderModal';
 import { ContentModal } from './components/ContentModal';
 import { ContextMenu, type ContextMenuState } from './components/ContextMenu';
 import { DomTreeView } from './components/DomTreeView';
+import { ScriptEvalModal } from './components/ScriptEvalModal';
 import './App.css';
 
 const DEFAULT_SERVER = 'http://localhost:3847';
@@ -28,6 +29,11 @@ export default function App() {
   const [contentModal, setContentModal] = useState<{ title: string; content: string } | null>(null);
   const [actionModalNode, setActionModalNode] = useState<DomNode | null>(null);
   const [actionRunning, setActionRunning] = useState(false);
+  const [scriptEvalOpen, setScriptEvalOpen] = useState(false);
+  const [scriptEvalCode, setScriptEvalCode] = useState('');
+  const [scriptEvalRunning, setScriptEvalRunning] = useState(false);
+  const [scriptEvalOutput, setScriptEvalOutput] = useState<string | null>(null);
+  const [scriptEvalError, setScriptEvalError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
@@ -118,7 +124,7 @@ export default function App() {
           return;
         }
         setContentModal({
-          title: contentType === 'innerHTML' ? 'Inner HTML' : 'Inner Text',
+          title: contentType === 'innerHTML' ? 'Element HTML' : 'Inner Text',
           content: res?.content ?? '',
         });
       },
@@ -160,6 +166,65 @@ export default function App() {
         }
         showToast('Actions completed');
         setActionModalNode(null);
+      },
+    );
+  };
+
+  const openScriptEval = () => {
+    closeContextMenu();
+    setScriptEvalOutput(null);
+    setScriptEvalError(null);
+    setScriptEvalOpen(true);
+  };
+
+  const closeScriptEval = () => {
+    if (scriptEvalRunning) return;
+    setScriptEvalOpen(false);
+    setScriptEvalOutput(null);
+    setScriptEvalError(null);
+  };
+
+  const runScriptEval = () => {
+    if (!latestTree || !scriptEvalCode.trim()) return;
+
+    const tabId = latestTree.meta?.tabId ?? latestTree.tabId;
+    const frameId = latestTree.meta?.frameId ?? latestTree.frameId;
+    if (!tabId) {
+      showToast('No active page session');
+      return;
+    }
+
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    setScriptEvalRunning(true);
+    setScriptEvalOutput(null);
+    setScriptEvalError(null);
+
+    socket.timeout(60000).emit(
+      'dom:eval-script',
+      {
+        tabId,
+        frameId: frameId ?? undefined,
+        url: latestTree.url,
+        code: scriptEvalCode,
+        extensionId: latestTree.meta?.from,
+      },
+      (err: Error | null, res: { ok?: boolean; result?: string; error?: string }) => {
+        setScriptEvalRunning(false);
+        if (err) {
+          setScriptEvalError(err.message ?? 'Request failed');
+          return;
+        }
+        if (res?.error) {
+          setScriptEvalError(res.error);
+          return;
+        }
+        if (res?.result === undefined) {
+          setScriptEvalError('Script eval returned no result');
+          return;
+        }
+        setScriptEvalOutput(res.result);
       },
     );
   };
@@ -257,6 +322,7 @@ export default function App() {
             <div className="tree-actions">
               <button type="button" onClick={openPureTreeModal}>Pure Tree</button>
               <button type="button" onClick={openMetaTreeModal}>Meta Tree</button>
+              <button type="button" onClick={openScriptEval}>Script Eval</button>
               <button type="button" className="primary" onClick={copyForAnalyze}>
                 Copy for Analyze
               </button>
@@ -312,6 +378,7 @@ export default function App() {
         onClose={closeContextMenu}
         onGetInnerHtml={() => fetchContent('innerHTML')}
         onGetInnerText={() => fetchContent('innerText')}
+        onScriptEval={openScriptEval}
         onAction={() => {
           closeContextMenu();
           if (contextNode) setActionModalNode(contextNode);
@@ -332,6 +399,19 @@ export default function App() {
           running={actionRunning}
           onClose={() => !actionRunning && setActionModalNode(null)}
           onRun={runActions}
+        />
+      )}
+
+      {scriptEvalOpen && latestTree && (
+        <ScriptEvalModal
+          pageLabel={latestTree.title || latestTree.url}
+          running={scriptEvalRunning}
+          output={scriptEvalOutput}
+          error={scriptEvalError}
+          code={scriptEvalCode}
+          onCodeChange={setScriptEvalCode}
+          onClose={closeScriptEval}
+          onRun={runScriptEval}
         />
       )}
 

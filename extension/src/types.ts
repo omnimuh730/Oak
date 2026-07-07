@@ -15,6 +15,7 @@ export interface DomTreePayload {
   tree: DomNode;
   fetchedAt: string;
   tabId?: number;
+  frameId?: number;
 }
 
 export const DEFAULT_SERVER = 'http://localhost:3847';
@@ -27,6 +28,7 @@ export const MSG = {
   CLEAR_HIGHLIGHT: 'oak:clear-highlight',
   GET_CONTENT: 'oak:get-content',
   EXECUTE_ACTIONS: 'oak:execute-actions',
+  EVAL_SCRIPT: 'oak:eval-script',
   SIDEBAR_OPEN: 'oak:sidebar-open',
   SIDEBAR_CLOSE: 'oak:sidebar-close',
   SOCKET_STATUS: 'oak:socket-status',
@@ -55,4 +57,12 @@ export interface ExecuteActionsPayload {
   nodeId: number;
   tabId: number;
   steps: ActionStep[];
+}
+
+export interface EvalScriptPayload {
+  tabId: number;
+  url: string;
+  code: string;
+  frameId?: number;
+  extensionId?: string;
 }

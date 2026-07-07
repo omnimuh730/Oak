@@ -25,7 +25,14 @@ async function typeText(el: HTMLElement, text: string): Promise<void> {
   el.focus();
 
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-    el.value = text;
+    const proto =
+      el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) {
+      setter.call(el, text);
+    } else {
+      el.value = text;
+    }
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     return;
@@ -92,7 +99,8 @@ export function getElementContent(
 ): string {
   const el = resolveElementByNodeId(nodeId);
   if (!el) throw new Error('Element not found in DOM');
+  // "innerHTML" here means the element's own markup (outerHTML), not its children only.
   return contentType === 'innerHTML'
-    ? el.innerHTML
+    ? el.outerHTML
     : ((el as HTMLElement).innerText ?? el.textContent ?? '');
 }

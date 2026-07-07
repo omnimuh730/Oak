@@ -3,7 +3,7 @@
   "name": "Oak",
   "version": "1.0.0",
   "description": "Fetch and visualize DOM trees via Oak UI Board",
-  "permissions": ["activeTab", "storage", "scripting", "alarms"],
+  "permissions": ["activeTab", "storage", "scripting", "alarms", "webNavigation"],
   "host_permissions": ["<all_urls>", "http://localhost:3847/*", "http://localhost:5173/*"],
   "background": {
     "service_worker": "src/background.ts",

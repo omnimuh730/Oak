@@ -23,8 +23,17 @@ export interface ExecuteActionsPayload extends NodeTargetPayload {
   steps: ActionStep[];
 }
 
+export interface EvalScriptPayload {
+  tabId: number;
+  url: string;
+  code: string;
+  frameId?: number;
+  extensionId?: string;
+}
+
 export interface DomCommandResult {
   ok?: boolean;
   content?: string;
+  result?: string;
   error?: string;
 }

@@ -15,6 +15,7 @@ export interface DomTreePayload {
   tree: DomNode;
   fetchedAt: string;
   tabId?: number;
+  frameId?: number;
 }
 
 export interface DomTreeMessage extends DomTreePayload {
@@ -25,6 +26,7 @@ export interface DomTreeMessage extends DomTreePayload {
     url: string;
     title: string;
     tabId: number | null;
+    frameId?: number | null;
     timestamp: number;
     nodeCount: number;
   };

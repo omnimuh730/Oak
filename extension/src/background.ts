@@ -1,9 +1,11 @@
 import { io, Socket } from 'socket.io-client';
+import { evalScriptInTab } from './eval-utils';
 import {
   DEFAULT_SERVER,
   MSG,
   type DomTreePayload,
   type ExecuteActionsPayload,
+  type EvalScriptPayload,
   type GetContentPayload,
   type HighlightPayload,
 } from './types';
@@ -84,6 +86,21 @@ function connectSocket(serverUrl: string) {
         ack?.(res);
       },
     );
+  });
+
+  socket.on('dom:eval-script', async (payload: EvalScriptPayload, ack?: (res: unknown) => void) => {
+    const { tabId, url, code } = payload;
+    if (!tabId || !url || !code?.trim()) {
+      ack?.({ error: 'Missing tabId, url, or code' });
+      return;
+    }
+
+    try {
+      const result = await evalScriptInTab(tabId, url, code, payload.frameId);
+      ack?.({ ok: true, result });
+    } catch (err) {
+      ack?.({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 }
 
