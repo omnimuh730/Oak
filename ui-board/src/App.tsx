@@ -22,6 +22,7 @@ const RESUME_FILE_KEY = 'eli_taylor';
 interface GenerateEvalScriptResponse {
   ok?: boolean;
   code?: string;
+  responseId?: string | null;
   error?: string;
 }
 
@@ -48,6 +49,8 @@ export default function App() {
   const [scriptEvalOakNodeId, setScriptEvalOakNodeId] = useState<number | null>(null);
   const [scriptEvalRunning, setScriptEvalRunning] = useState(false);
   const [autoGenerateRunning, setAutoGenerateRunning] = useState(false);
+  const [reanalyzeRunning, setReanalyzeRunning] = useState(false);
+  const [scriptEvalAiResponseId, setScriptEvalAiResponseId] = useState<string | null>(null);
   const [scriptEvalOutput, setScriptEvalOutput] = useState<string | null>(null);
   const [scriptEvalError, setScriptEvalError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -199,6 +202,7 @@ export default function App() {
     setScriptEvalOpen(false);
     setScriptEvalOakNodeId(null);
     setScriptEvalFiles([]);
+    setScriptEvalAiResponseId(null);
     setScriptEvalOutput(null);
     setScriptEvalError(null);
   };
@@ -249,7 +253,7 @@ export default function App() {
             setScriptEvalError('Script eval returned no result');
             return;
           }
-          setScriptEvalOutput(res.result);
+          setScriptEvalOutput(formatEvalOutput(res.result));
         },
       );
     },
@@ -314,6 +318,7 @@ export default function App() {
       setScriptEvalCode(generatedCode);
       setScriptEvalFiles(filesForRun);
       setScriptEvalOakNodeId(null);
+      setScriptEvalAiResponseId(generation.responseId ?? null);
       setScriptEvalOpen(true);
       showToast('Generated eval script; running now');
 
@@ -325,6 +330,65 @@ export default function App() {
       showToast('Auto generate run failed');
     } finally {
       setAutoGenerateRunning(false);
+    }
+  };
+
+  const handleAnalyzeResultAndRerun = async () => {
+    if (!latestTree || !splitTrees || !scriptEvalCode.trim()) return;
+    if (scriptEvalOutput === null && !scriptEvalError) {
+      showToast('No eval result to analyze');
+      return;
+    }
+
+    setReanalyzeRunning(true);
+    setScriptEvalError(null);
+
+    try {
+      const analyzeText = formatPureTreeForAnalyze(splitTrees.pure, {
+        title: latestTree.title || 'Untitled',
+        url: latestTree.url,
+        fetchedAt: latestTree.fetchedAt,
+      });
+
+      const generation = await fetchJson<GenerateEvalScriptResponse>(
+        `${DEFAULT_AI_SERVER}/api/repair-eval-script`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            previousResponseId: scriptEvalAiResponseId,
+            currentCode: scriptEvalCode,
+            evalResult: scriptEvalOutput,
+            evalError: scriptEvalError,
+            analyzeText,
+            page: {
+              title: latestTree.title || 'Untitled',
+              url: latestTree.url,
+              fetchedAt: latestTree.fetchedAt,
+            },
+            resumeKey: RESUME_FILE_KEY,
+          }),
+        },
+      );
+
+      const repairedCode = generation.code?.trim();
+      if (!repairedCode) {
+        throw new Error(generation.error || 'AI backend returned no repaired eval script');
+      }
+
+      const filesForRun = await ensureRuntimeResumeFile(repairedCode, scriptEvalFiles);
+      setScriptEvalCode(repairedCode);
+      setScriptEvalFiles(filesForRun);
+      setScriptEvalAiResponseId(generation.responseId ?? scriptEvalAiResponseId);
+      showToast('Reanalyzed result; running repair once');
+
+      runScriptEval({ code: repairedCode, files: filesForRun, oakNodeId: null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setScriptEvalError(message);
+      showToast('Reanalyze run failed');
+    } finally {
+      setReanalyzeRunning(false);
     }
   };
 
@@ -507,6 +571,9 @@ export default function App() {
           onFilesChange={setScriptEvalFiles}
           onClose={closeScriptEval}
           onRun={runScriptEval}
+          reanalyzeRunning={reanalyzeRunning}
+          canReanalyze={Boolean(scriptEvalCode.trim() && (scriptEvalOutput !== null || scriptEvalError))}
+          onReanalyzeRun={handleAnalyzeResultAndRerun}
         />
       )}
 
@@ -523,6 +590,13 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(message);
   }
   return data as T;
+}
+
+function formatEvalOutput(output: string | undefined): string {
+  if (output === undefined || output.trim() === 'undefined') {
+    return JSON.stringify({ ok: true, result: 'Script completed without return value' }, null, 2);
+  }
+  return output;
 }
 
 async function ensureRuntimeResumeFile(code: string, existingFiles: AttachedFile[]): Promise<AttachedFile[]> {

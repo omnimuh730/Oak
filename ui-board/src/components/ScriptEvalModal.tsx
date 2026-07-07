@@ -14,6 +14,9 @@ interface Props {
   onFilesChange: (files: AttachedFile[]) => void;
   onClose: () => void;
   onRun: () => void;
+  reanalyzeRunning: boolean;
+  canReanalyze: boolean;
+  onReanalyzeRun: () => void;
 }
 
 const PLACEHOLDER = `(function() {
@@ -99,11 +102,15 @@ export function ScriptEvalModal({
   onFilesChange,
   onClose,
   onRun,
+  reanalyzeRunning,
+  canReanalyze,
+  onReanalyzeRun,
 }: Props) {
   const [readingFiles, setReadingFiles] = useState(false);
   const [fileWarning, setFileWarning] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const busy = running || reanalyzeRunning;
 
   const addFiles = async (fileList: FileList | File[]) => {
     const incoming = Array.from(fileList);
@@ -139,19 +146,19 @@ export function ScriptEvalModal({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (running || readingFiles) return;
+    if (busy || readingFiles) return;
     void addFiles(e.dataTransfer.files);
   };
 
   return (
-    <div className="modal-backdrop" onClick={() => !running && onClose()}>
+    <div className="modal-backdrop" onClick={() => !busy && onClose()}>
       <div className="modal-panel script-eval-modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal-header">
           <div>
             <h2>Script Eval</h2>
             <p className="modal-subtitle">{pageLabel}</p>
           </div>
-          <button type="button" className="modal-close" onClick={onClose} disabled={running}>✕</button>
+          <button type="button" className="modal-close" onClick={onClose} disabled={busy}>✕</button>
         </header>
 
         <div className="script-eval-body">
@@ -164,25 +171,25 @@ export function ScriptEvalModal({
             onChange={(e) => onCodeChange(e.target.value)}
             placeholder={PLACEHOLDER}
             spellCheck={false}
-            disabled={running}
+            disabled={busy}
           />
 
           <div
             className={`script-eval-dropzone ${dragOver ? 'drag-over' : ''}`}
             onDragOver={(e) => {
               e.preventDefault();
-              if (!running && !readingFiles) setDragOver(true);
+              if (!busy && !readingFiles) setDragOver(true);
             }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
-            onClick={() => !running && !readingFiles && fileInputRef.current?.click()}
+            onClick={() => !busy && !readingFiles && fileInputRef.current?.click()}
           >
             <input
               ref={fileInputRef}
               type="file"
               multiple
               className="script-eval-file-input"
-              disabled={running || readingFiles}
+              disabled={busy || readingFiles}
               onChange={(e) => {
                 if (e.target.files?.length) void addFiles(e.target.files);
                 e.target.value = '';
@@ -207,7 +214,7 @@ export function ScriptEvalModal({
                   <button
                     type="button"
                     className="script-eval-file-remove"
-                    disabled={running || readingFiles}
+                    disabled={busy || readingFiles}
                     onClick={() => removeFile(file.key)}
                     aria-label={`Remove ${file.name}`}
                   >
@@ -229,11 +236,19 @@ export function ScriptEvalModal({
         </div>
 
         <footer className="modal-footer">
-          <button type="button" onClick={onClose} disabled={running}>Cancel</button>
+          <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy || readingFiles || !canReanalyze}
+            onClick={onReanalyzeRun}
+          >
+            {reanalyzeRunning ? 'Reanalyzing...' : 'Analyze Result & Re-run'}
+          </button>
           <button
             type="button"
             className="primary danger"
-            disabled={running || readingFiles || !code.trim()}
+            disabled={busy || readingFiles || !code.trim()}
             onClick={onRun}
           >
             {running ? 'Running…' : 'Run'}

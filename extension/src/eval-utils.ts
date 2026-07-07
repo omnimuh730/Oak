@@ -172,8 +172,136 @@ function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): stri
     return null;
   }
 
+  function queryDeepAll(root, selector, results) {
+    const out = results || [];
+    if (root && 'querySelectorAll' in root) {
+      try {
+        const direct = root.querySelectorAll(selector);
+        for (let i = 0; i < direct.length; i++) out.push(direct[i]);
+      } catch {}
+    }
+
+    const nodes = root && 'querySelectorAll' in root ? root.querySelectorAll('*') : [];
+    for (let i = 0; i < nodes.length; i++) {
+      const child = nodes[i];
+      if (child.shadowRoot) queryDeepAll(child.shadowRoot, selector, out);
+      if (child.tagName === 'IFRAME') {
+        try {
+          const doc = child.contentDocument;
+          if (doc) queryDeepAll(doc, selector, out);
+        } catch {}
+      }
+    }
+    return Array.from(new Set(out));
+  }
+
+  function textOf(el) {
+    return (el && (el.textContent || el.getAttribute?.('aria-label') || el.getAttribute?.('title')) || '')
+      .replace(/\\s+/g, ' ')
+      .trim();
+  }
+
+  function textMatches(actual, expected) {
+    const a = String(actual || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    const e = String(expected || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    return Boolean(a && e && (a === e || a.startsWith(e) || a.includes(e)));
+  }
+
+  function dispatchChange(el) {
+    if (!el) return;
+    el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true, cancelable: true }));
+  }
+
+  function clickLikeUser(el) {
+    if (!el) return null;
+    if (el instanceof HTMLElement) {
+      try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch {}
+      try { el.focus(); } catch {}
+    }
+    const mouseInit = { bubbles: true, cancelable: true, view: window };
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      try {
+        const evt = type.startsWith('pointer')
+          ? new PointerEvent(type, mouseInit)
+          : new MouseEvent(type, mouseInit);
+        el.dispatchEvent(evt);
+      } catch {
+        try { el.dispatchEvent(new MouseEvent(type, mouseInit)); } catch {}
+      }
+    }
+    try { el.click?.(); } catch {}
+    return el;
+  }
+
+  function setSelectByText(select, text) {
+    if (!select || select.tagName !== 'SELECT') return false;
+    const options = Array.from(select.options || []);
+    const option =
+      options.find((opt) => textOf(opt).toLowerCase() === String(text).trim().toLowerCase()) ||
+      options.find((opt) => textMatches(textOf(opt), text)) ||
+      options.find((opt) => textMatches(opt.value, text));
+    if (!option) return false;
+    select.value = option.value;
+    option.selected = true;
+    dispatchChange(select);
+    return true;
+  }
+
+  async function clickIcimsDropdownOption(target, optionText, timeoutMs) {
+    const el = typeof target === 'number' ? queryDeep(document, '[data-oak-id="' + target + '"]') : target;
+    if (!el) return false;
+
+    const baseId =
+      el.tagName === 'SELECT' && el.id ? el.id :
+        el.id && el.id.endsWith('_icimsDropdown') ? el.id.replace(/_icimsDropdown$/, '') :
+          el.getAttribute?.('aria-controls')?.replace(/_dropdown-results$/, '') ||
+          el.closest?.('.dropdown-container')?.id?.replace(/_icimsDropdown_ctnr$/, '') ||
+          '';
+
+    const nativeSelect = baseId ? queryDeep(document, '#' + CSS.escape(baseId)) : null;
+    if (nativeSelect && setSelectByText(nativeSelect, optionText)) return true;
+
+    const trigger =
+      baseId ? queryDeep(document, '#' + CSS.escape(baseId + '_icimsDropdown')) : null;
+    const container =
+      baseId ? queryDeep(document, '#' + CSS.escape(baseId + '_icimsDropdown_ctnr')) : el.closest?.('.dropdown-container');
+
+    clickLikeUser(trigger || el);
+
+    const root = container || document;
+    const waitLimit = timeoutMs == null ? 5000 : timeoutMs;
+    const option = await new Promise((resolve) => {
+      const deadline = Date.now() + waitLimit;
+      const check = () => {
+        const options = queryDeepAll(root, '[role="option"], .dropdown-result, li');
+        const exact = options.find((item) => textOf(item).toLowerCase() === String(optionText).trim().toLowerCase());
+        const loose = exact || options.find((item) => textMatches(textOf(item), optionText));
+        if (loose) {
+          resolve(loose);
+          return;
+        }
+        if (Date.now() > deadline) {
+          resolve(null);
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+      check();
+    });
+
+    if (!option) return false;
+    clickLikeUser(option);
+    if (nativeSelect) dispatchChange(nativeSelect);
+    return true;
+  }
+
   const __oak = {
     queryDeep,
+    queryDeepAll(root, selector) {
+      return queryDeepAll(root || document, selector);
+    },
     byId(id) {
       if (!id) return null;
       try {
@@ -184,6 +312,31 @@ function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): stri
     },
     byOakId(nodeId) {
       return queryDeep(document, '[data-oak-id="' + nodeId + '"]');
+    },
+    click(el) {
+      return clickLikeUser(el);
+    },
+    async clickIcimsDropdownOption(target, optionText, timeoutMs) {
+      return clickIcimsDropdownOption(target, optionText, timeoutMs);
+    },
+    async selectByText(el, text, timeoutMs) {
+      if (!el) return false;
+      if (el.tagName === 'SELECT') {
+        if (setSelectByText(el, text)) return true;
+        if (el.getAttribute('icimsdropdown-enabled') === '1' || el.classList?.contains('dropdown-hide')) {
+          return clickIcimsDropdownOption(el, text, timeoutMs);
+        }
+        return false;
+      }
+      if (
+        el.getAttribute?.('role') === 'combobox' ||
+        el.classList?.contains('dropdown-select') ||
+        el.classList?.contains('dropdown-search') ||
+        el.closest?.('.dropdown-container')
+      ) {
+        return clickIcimsDropdownOption(el, text, timeoutMs);
+      }
+      return false;
     },
     setValue(el, value) {
       if (!el) throw new Error('Element not found');
@@ -251,7 +404,9 @@ function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): stri
   };
 
   function formatEvalResult(value) {
-    if (value === undefined) return 'undefined';
+    if (value === undefined) {
+      return JSON.stringify({ ok: true, result: 'Script completed without return value' }, null, 2);
+    }
     if (value === null) return 'null';
 
     const type = typeof value;

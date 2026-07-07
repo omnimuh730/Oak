@@ -1,5 +1,5 @@
 .script-eval-modal {
-  max-width: 760px;
+  max-width: 960px;
 }
 
 .script-eval-body {
@@ -168,4 +168,15 @@
 
 .modal-footer .primary.danger:hover:not(:disabled) {
   background: #d55;
+}
+
+.modal-footer .secondary {
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text);
+}
+
+.modal-footer .secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-glow);
 }

@@ -1,1 +1,81 @@
-Name                : Eli Taylor (split into First: Eli, Last: Taylor if separate) Preferred Name      : Eli Taylor Name Pronunciation  : EE-lye TAY-lor Email               : [ace.elitaylor@gmail.com](mailto:ace.elitaylor@gmail.com) Phone               : (425) 642-4153 LinkedIn            : [https://linkedin.com/in/oli-taylor-0a602616b](https://linkedin.com/in/oli-taylor-0a602616b) GitHub              : [https://github.com/eli-taylor-arc](https://github.com/eli-taylor-arc) Portfolio           : [https://github.com/eli-taylor-arc](https://github.com/eli-taylor-arc) Current Company     : McGrow Hill Location            : Snohomish, Washington   (State: Washington, City: Snohomish, ZIP: 98290, Country: United States) Work Authorization  : Yes  (US Citizen) Visa Sponsorship    : No Pronouns            : he/him Gender              : Male Race/Ethnicity      : Asian Hispanic/Latino     : No Disability          : No Military Status     : Not protected (or "I don't wish to answer" if exact match unavailable) Desired Salary      : 130000 How did you hear    : LinkedIn Previously at company: No Cover letter / “Why you are a great fit” : "I have deep experience in full-stack development, infrastructure, and AI-assisted workflows, and I thrive in fast-paced, innovative environments." Password (for account creation) : [Psr@79.com](mailto:Psr@79.com)   (use the same value for Verify Password)
+{
+  "name": "Eli Taylor",
+  "autoBidProfile": {
+    "fullName": "Eli Taylor",
+    "firstName": "Eli",
+    "lastName": "Taylor",
+    "age": "34",
+    "address": "918 Root Ave",
+    "location: "Snohomish, Washington",
+    "city": "Snohomish",
+    "state": "Washington",
+    "country": "United States",
+    "zipCode": "98290",
+    "desiredSalary": "130000",
+    "gender": "male",
+    "pronouns": "he/him",
+    "sexualOrientation": "heterosexual",
+    "email": "ace.elitaylor@gmail.com",
+    "phone": "(425) 642-4153",
+    "linkedin": "https://linkedin.com/in/oli-taylor-0a602616b",
+    "github": "https://github.com/eli-taylor-arc",
+    "portfolioUrl": "https://github.com/eli-taylor-arc",
+    "education": [
+      {
+        "school": "Washington State University",
+        "diploma": "Bachelor of Science in Computer Science",
+        "startMonth": "8",
+        "startYear": "2011",
+        "endMonth": "5",
+        "endYear": "2016"
+      }
+    ],
+    "careers": [
+      {
+        "company": "McGrow Hill",
+        "title": "Senior Software Engineer",
+        "startMonth": "2",
+        "startYear": "2026",
+        "endPresent": true,
+        "endMonth": "",
+        "endYear": ""
+      },
+      {
+        "company": "Accolade, Inc",
+        "title": "Senior Software Engineer",
+        "startMonth": "1",
+        "startYear": "2022",
+        "endPresent": false,
+        "endMonth": "2",
+        "endYear": "2026"
+      },
+      {
+        "company": "WSECU",
+        "title": "Software Engineer",
+        "startMonth": "6",
+        "startYear": "2021",
+        "endPresent": false,
+        "endMonth": "1",
+        "endYear": "2022"
+      },
+      {
+        "company": "Robert Half",
+        "title": "Software Engineer",
+        "startMonth": "9",
+        "startYear": "2016",
+        "endPresent": false,
+        "endMonth": "5",
+        "endYear": "2021"
+      }
+    ],
+    "prefSponsorship": false,
+    "prefVeteranFriendly": false,
+    "prefDisabilityFriendly": false,
+    "demographicHispanic": "no",
+    "demographicRaceEthnicity": "asian",
+    "demographicDisability": "no",
+    "demographicMilitaryStatus": "not_protected",
+    "sponsorship": "no",
+    "immigrationStatus": "us_citizen",
+  },
+}
