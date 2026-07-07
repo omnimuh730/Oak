@@ -31,6 +31,10 @@ interface ResumeAttachmentResponse {
   error?: string;
 }
 
+interface FetchTreeResponse extends Partial<DomTreeMessage> {
+  error?: string;
+}
+
 export default function App() {
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
   const [connected, setConnected] = useState(false);
@@ -278,6 +282,72 @@ export default function App() {
     showToast('Copied for analyze');
   };
 
+  const fetchLiveAnalyzeText = async (): Promise<string | null> => {
+    if (!latestTree) return null;
+
+    const tabId = latestTree.meta?.tabId ?? latestTree.tabId;
+    if (!tabId) return null;
+
+    const socket = socketRef.current;
+    if (!socket) return null;
+
+    const liveTree = await new Promise<FetchTreeResponse>((resolve, reject) => {
+      socket.timeout(20000).emit(
+        'dom:fetch-tree',
+        {
+          tabId,
+          frameId: latestTree.meta?.frameId ?? latestTree.frameId ?? undefined,
+          url: latestTree.url,
+          extensionId: latestTree.meta?.from,
+        },
+        (err: Error | null, res: FetchTreeResponse) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          if (res?.error) {
+            reject(new Error(res.error));
+            return;
+          }
+          if (!res?.tree) {
+            reject(new Error('No DOM tree returned from page'));
+            return;
+          }
+          resolve(res);
+        },
+      );
+    });
+
+    const nextTree: DomTreeMessage = {
+      url: liveTree.url ?? latestTree.url,
+      title: liveTree.title ?? latestTree.title,
+      tree: liveTree.tree ?? latestTree.tree,
+      fetchedAt: liveTree.fetchedAt ?? new Date().toISOString(),
+      tabId,
+      frameId: liveTree.frameId ?? latestTree.frameId,
+      meta: {
+        from: latestTree.meta?.from ?? '',
+        clientType: latestTree.meta?.clientType ?? 'extension',
+        clientName: latestTree.meta?.clientName ?? 'Oak Extension',
+        url: liveTree.url ?? latestTree.url,
+        title: liveTree.title ?? latestTree.title,
+        tabId,
+        frameId: liveTree.frameId ?? latestTree.meta?.frameId ?? latestTree.frameId ?? null,
+        timestamp: Date.now(),
+        nodeCount: countNodes(liveTree.tree),
+      },
+    };
+    setLatestTree(nextTree);
+    setHistory((prev) => [nextTree, ...prev].slice(0, 20));
+
+    const liveSplit = splitDomTree(nextTree.tree);
+    return formatPureTreeForAnalyze(liveSplit.pure, {
+      title: nextTree.title || 'Untitled',
+      url: nextTree.url,
+      fetchedAt: nextTree.fetchedAt,
+    });
+  };
+
   const handleAutoGenerateRun = async () => {
     if (!latestTree || !splitTrees) return;
 
@@ -286,11 +356,16 @@ export default function App() {
     setScriptEvalError(null);
 
     try {
-      const analyzeText = formatPureTreeForAnalyze(splitTrees.pure, {
+      let analyzeText = formatPureTreeForAnalyze(splitTrees.pure, {
         title: latestTree.title || 'Untitled',
         url: latestTree.url,
         fetchedAt: latestTree.fetchedAt,
       });
+      try {
+        analyzeText = (await fetchLiveAnalyzeText()) ?? analyzeText;
+      } catch (err) {
+        showToast(`Using previous DOM: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
       const generation = await fetchJson<GenerateEvalScriptResponse>(
         `${DEFAULT_AI_SERVER}/api/generate-eval-script`,

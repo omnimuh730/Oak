@@ -15,10 +15,6 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const PROFILE_PATH = resolveFromRepo(process.env.PROFILE_FILE_PATH || 'profile.md');
 const RESUME_PATH = resolveFromRepo(process.env.RESUME_FILE_PATH || 'Eli Taylor.docx');
 
-const profileText = await readProfile();
-
-console.log(profileText);
-
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -61,7 +57,7 @@ app.post('/api/generate-eval-script', async (req, res) => {
       return;
     }
 
-//    const profileText = await readProfile();
+    const profileText = await readProfile();
     const { systemPrompt, userPrompt } = buildEvalScriptPrompt({
       analyzeText,
       profileText,
@@ -173,8 +169,10 @@ Runtime helpers available inside the code:
 - __oak.queryDeep(root, selector): querySelector through shadow roots and same-origin iframes. It returns one element only.
 - __oak.queryDeepAll(root, selector): querySelectorAll through shadow roots and same-origin iframes. It returns an array of elements.
 - __oak.setValue(element, value): sets native input/textarea values and dispatches input/change/blur events.
-- await __oak.selectByText(element, text): selects native <select> options by visible text and handles iCIMS fake dropdowns when needed.
+- await __oak.selectByText(element, text): selects native <select> options by visible text and routes known fake dropdowns when possible.
 - await __oak.clickIcimsDropdownOption(elementOrOakNodeId, text): opens an iCIMS dropdown and clicks a visible option by exact/near text.
+- await __oak.selectWorkdayDropdownOption(elementOrOakNodeIdOrDomId, text): opens a Workday dropdown button with aria-haspopup="listbox" and clicks a visible option by exact/near text.
+- __oak.setWorkdayDate(groupElementOrOakNodeIdOrDomId, month, year): fills Workday MM/YYYY date groups by setting the Month and Year spinbutton inputs.
 - __oak.click(element): dispatches pointer/mouse/click events like a user click.
 - __oak.waitFor(selectorOrFn, timeoutMs): waits for an element or condition.
 - window.attachDroppedFile(input, '${resumeKey}'): attaches the Oak runtime file for Eli Taylor's resume/CV.
@@ -188,12 +186,20 @@ Critical resume rule:
 Generation rules:
 - Use the supplied Copy for Analyze DOM tree as the source of truth for actual fields and Oak node ids.
 - Use profile.md as the source of truth for candidate values.
+- Filling the resume upload alone is never sufficient unless the analyzed DOM truly contains no other visible editable, required, invalid, or validation-error fields.
+- Treat visible error text such as "The field X is required and must have a value", aria-invalid="true", aria-required="true", required stars, and Workday/iCIMS alert nodes as high-priority fields to fill or report.
 - Generate page-specific code for the actual form controls in this DOM tree. Do not generate a broad reusable autofill engine, giant field configuration array, mutation observer, or generic "Sample text" fallback.
 - Handle every actual fillable control shown in the analyzed DOM: text inputs, email, phone, URL, textarea, select, radio, checkbox, combobox/autocomplete, and file upload.
 - Never skip an actual form field. If a field has an explicit profile value or exact option answer, fill it. If a required acknowledgement/terms checkbox exists, check it. If an exact safe value cannot be determined, put that field in the returned missing array with its Oak node id and visible label instead of silently ignoring it.
 - Prefer __oak.byOakId(nodeId) selectors from the tree. Use CSS selectors only as a backup.
+- Prefer the analyzed control/container Oak node ids over hardcoded long question text searches. Do not locate fields with broad loops such as document.querySelectorAll('button').find(...includes(fullQuestionText)) when the tree provides a node id for the field, button, input, or fieldset.
+- Only push an item into filled after the actual fill call returns true or a direct DOM verification confirms the value/checked/selected state changed. If a helper returns false, push that field into missing with its Oak node id and visible label.
+- For Workday date groups that show MM/YYYY, call __oak.setWorkdayDate(groupElementOrOakNodeIdOrDomId, month, year). Use 1-12 month numbers such as "2" and four-digit years such as "2026".
+- For Workday dropdown buttons, fieldsets, or containers that show button[aria-haspopup="listbox"], use await __oak.selectWorkdayDropdownOption(nodeOrElement, exactVisibleOptionText). Do not use __oak.clickIcimsDropdownOption for Workday controls.
+- For Work Experience fields, use profile.md autoBidProfile.careers. Use the first career entry for Work Experience 1 unless the DOM clearly asks for another entry. If endPresent is true, check "I currently work here" and do not invent a To date; otherwise fill To month/year.
+- For Education fields, use profile.md autoBidProfile.education. Map "School or University" to school, "Degree" to diploma, and date fields to start/end month/year.
 - For native selects, use await __oak.selectByText(selectEl, exactVisibleText).
-- For iCIMS dropdowns, do not type into the search input and do not hand-roll queryDeepAll loops unless absolutely necessary. Use await __oak.clickIcimsDropdownOption(selectElOrComboboxOrSearchInputOrOakNodeId, exactVisibleOptionText). The analyzed tree often shows a hidden select, an <a role="combobox">, an input.dropdown-search, and <li role="option"> nodes; pick the real option text from the tree and call the helper.
+- For iCIMS dropdowns only, do not type into the search input and do not hand-roll queryDeepAll loops unless absolutely necessary. Use await __oak.clickIcimsDropdownOption(selectElOrComboboxOrSearchInputOrOakNodeId, exactVisibleOptionText). The analyzed tree often shows a hidden select, an <a role="combobox">, an input.dropdown-search, and <li role="option"> nodes; pick the real option text from the tree and call the helper.
 - For radios/checkboxes, click the exact option/control. Dispatch pointer/mouse/click/input/change events as needed.
 - Do not click final Submit/Apply/Send buttons. It is okay to click a non-final Next/Continue/Save and Continue button only when the DOM clearly represents a multi-step form and current fields are filled.
 - Keep the script narrowly focused on filling the current application form. No network requests, no localStorage scraping, no navigation away from the page, no unrelated logging.
@@ -238,29 +244,33 @@ Runtime helpers now available:
 - __oak.setValue(element, value)
 - await __oak.selectByText(element, text)
 - await __oak.clickIcimsDropdownOption(elementOrOakNodeId, text)
+- await __oak.selectWorkdayDropdownOption(elementOrOakNodeIdOrDomId, text)
+- __oak.setWorkdayDate(groupElementOrOakNodeIdOrDomId, month, year)
 - __oak.click(element)
 - __oak.waitFor(selectorOrFn, timeoutMs)
 - window.attachDroppedFile(input, '${resumeKey}')
 
 Repair rules:
 - If the result has missing fields that are actually available in profile.md and the analyzed DOM, fix those fields.
+- If fresh post-run Analyze DOM contains visible validation errors, aria-invalid="true", or required empty fields, treat the previous run as failed even if its JSON said { ok: true, missing: [] }.
+- Filling the resume upload alone is never enough when the fresh Analyze DOM still contains Work Experience, Education, or other required validation errors.
 - If a missing field has no source value in profile.md, keep it in missing and do not invent a value.
-- For iCIMS dropdowns, use __oak.selectByText or __oak.clickIcimsDropdownOption with exact visible option text from the DOM. Do not type into dropdown-search as the primary strategy.
+- Fix dishonest success reporting: do not add a field to filled unless its helper/setter returned true or the DOM verifies the value/checked/selected state changed. If a fill attempt fails, add that field to missing.
+- Prefer the analyzed control/container Oak node ids over hardcoded long question text searches. Do not locate fields with broad loops such as document.querySelectorAll('button').find(...includes(fullQuestionText)) when the tree provides a node id for the field, button, input, or fieldset.
+- For Workday date groups that show MM/YYYY, call __oak.setWorkdayDate(groupElementOrOakNodeIdOrDomId, month, year). If the profile career has endPresent=true, check "I currently work here" instead of inventing a To date.
+- For Workday dropdown buttons, fieldsets, or containers that show button[aria-haspopup="listbox"], use await __oak.selectWorkdayDropdownOption(nodeOrElement, exactVisibleOptionText). Do not use __oak.clickIcimsDropdownOption for Workday controls.
+- For Work Experience, use profile.md autoBidProfile.careers. For Education, use profile.md autoBidProfile.education.
+- For iCIMS dropdowns only, use __oak.selectByText or __oak.clickIcimsDropdownOption with exact visible option text from the DOM. Do not type into dropdown-search as the primary strategy.
 - Always return { ok: true, filled: [...], missing: [...] }. Never return undefined.
 `.trim();
 
-  const fallbackContext = hasPreviousResponse
-    ? ''
-    : `
-No previous_response_id was supplied, so use this full context:
-
+  const context = `
 Page:
 ${JSON.stringify(page, null, 2)}
 
-profile.md:
-${profileText}
+${hasPreviousResponse ? 'Use the profile.md candidate values from the previous response context.' : `profile.md:\n${profileText}`}
 
-Copy for Analyze DOM tree:
+Fresh post-run Copy for Analyze DOM tree:
 ${analyzeText || '(not supplied)'}
 `;
 
@@ -271,7 +281,7 @@ ${evalError ? `ERROR:\n${evalError}` : `RESULT:\n${evalResult}`}
 Current generated script:
 ${currentCode}
 
-${fallbackContext}
+${context}
 
 Generate the repaired full JavaScript body now. Preserve working fills and only fix the result issue. Remember: the resume is runtime-only with key "${resumeKey}".
 `.trim();

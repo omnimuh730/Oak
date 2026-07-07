@@ -88,6 +88,29 @@ function connectSocket(serverUrl: string) {
     );
   });
 
+  socket.on('dom:fetch-tree', async (payload: { tabId?: number }, ack?: (res: unknown) => void) => {
+    const { tabId } = payload ?? {};
+    if (!tabId) {
+      ack?.({ error: 'Missing tabId' });
+      return;
+    }
+
+    try {
+      const result = await chrome.tabs.sendMessage(tabId, { type: MSG.FETCH_DOM });
+      if (result?.error) {
+        ack?.({ error: result.error });
+        return;
+      }
+      if (!result?.tree) {
+        ack?.({ error: 'No DOM tree returned from page' });
+        return;
+      }
+      ack?.({ ...result, tabId });
+    } catch (err) {
+      ack?.({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   socket.on('dom:eval-script', async (payload: EvalScriptPayload, ack?: (res: unknown) => void) => {
     const { tabId, url, code } = payload;
     if (!tabId || !url || !code?.trim()) {

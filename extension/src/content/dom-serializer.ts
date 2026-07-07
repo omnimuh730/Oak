@@ -143,7 +143,27 @@ function serializeNode(el: Element, depth: number): DomNode[] {
   const classes = el.classList?.length ? Array.from(el.classList).slice(0, 3) : undefined;
   const attrs: Record<string, string> = {};
   
-  for (const attr of ['href', 'src', 'type', 'role', 'name', 'aria-label', 'placeholder', 'value']) {
+  for (const attr of [
+    'href',
+    'src',
+    'for',
+    'type',
+    'role',
+    'name',
+    'aria-label',
+    'aria-labelledby',
+    'aria-describedby',
+    'aria-required',
+    'aria-invalid',
+    'aria-checked',
+    'autocomplete',
+    'placeholder',
+    'value',
+    'data-automation-id',
+    'data-fkit-id',
+    'selected',
+    'checked',
+  ]) {
     const val = el.getAttribute(attr);
     if (val) attrs[attr] = val.slice(0, 120);
   }

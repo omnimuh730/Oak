@@ -204,7 +204,11 @@ function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): stri
   function textMatches(actual, expected) {
     const a = String(actual || '').replace(/\\s+/g, ' ').trim().toLowerCase();
     const e = String(expected || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-    return Boolean(a && e && (a === e || a.startsWith(e) || a.includes(e)));
+    if (!a || !e) return false;
+    if (a === e || a.startsWith(e) || a.includes(e)) return true;
+    const actualDigits = a.replace(/\\D/g, '');
+    const expectedDigits = e.replace(/\\D/g, '');
+    return Boolean(actualDigits && expectedDigits && actualDigits === expectedDigits);
   }
 
   function dispatchChange(el) {
@@ -297,6 +301,98 @@ function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): stri
     return true;
   }
 
+  async function selectWorkdayDropdownOption(target, optionText, timeoutMs) {
+    const el =
+      typeof target === 'number'
+        ? queryDeep(document, '[data-oak-id="' + target + '"]')
+        : typeof target === 'string'
+          ? queryDeep(document, '#' + CSS.escape(target)) || queryDeep(document, '[data-automation-id="' + target + '"]')
+          : target;
+    if (!el) return false;
+
+    const button =
+      el.matches?.('button[aria-haspopup="listbox"]') ? el :
+        el.querySelector?.('button[aria-haspopup="listbox"]') ||
+        el.closest?.('[data-automation-id^="formField-"]')?.querySelector?.('button[aria-haspopup="listbox"]') ||
+        el.closest?.('fieldset')?.querySelector?.('button[aria-haspopup="listbox"]');
+    if (!button) return false;
+
+    const beforeText = textOf(button);
+    clickLikeUser(button);
+
+    const waitLimit = timeoutMs == null ? 6000 : timeoutMs;
+    const option = await new Promise((resolve) => {
+      const deadline = Date.now() + waitLimit;
+      const check = () => {
+        const candidates = queryDeepAll(document, [
+          '[role="option"]',
+          '[data-automation-id="promptOption"]',
+          '[data-automation-id="menuItem"]',
+          '[data-automation-id="selectedItem"]',
+          '[aria-selected]',
+        ].join(','));
+        const visible = candidates.filter((item) => {
+          const rect = item.getBoundingClientRect?.();
+          return !rect || rect.width > 0 || rect.height > 0;
+        });
+        const exact = visible.find((item) => textOf(item).toLowerCase() === String(optionText).trim().toLowerCase());
+        const loose = exact || visible.find((item) => textMatches(textOf(item), optionText));
+        if (loose) {
+          resolve(loose);
+          return;
+        }
+        if (Date.now() > deadline) {
+          resolve(null);
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+      check();
+    });
+
+    if (!option) {
+      try { button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } catch {}
+      return false;
+    }
+
+    clickLikeUser(option);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    dispatchChange(button);
+
+    const afterText = textOf(button);
+    const hiddenInput = button.parentElement?.querySelector?.('input[type="text"], input[type="hidden"]');
+    const hiddenValue = hiddenInput && 'value' in hiddenInput ? String(hiddenInput.value || '') : '';
+    return (
+      textMatches(afterText, optionText) ||
+      Boolean(hiddenValue) ||
+      beforeText !== afterText
+    );
+  }
+
+  function setWorkdayDate(target, month, year) {
+    const root =
+      typeof target === 'number'
+        ? queryDeep(document, '[data-oak-id="' + target + '"]')
+        : typeof target === 'string'
+          ? queryDeep(document, '#' + CSS.escape(target)) || queryDeep(document, '[data-automation-id="' + target + '"]')
+          : target;
+    if (!root) return false;
+
+    const monthInput =
+      root.matches?.('input[aria-label="Month"]') ? root :
+        root.querySelector?.('input[aria-label="Month"], input[id$="-dateSectionMonth-input"], [data-automation-id="dateSectionMonth-input"]');
+    const yearInput =
+      root.matches?.('input[aria-label="Year"]') ? root :
+        root.querySelector?.('input[aria-label="Year"], input[id$="-dateSectionYear-input"], [data-automation-id="dateSectionYear-input"]');
+
+    if (!monthInput || !yearInput) return false;
+    __oak.setValue(monthInput, String(month));
+    __oak.setValue(yearInput, String(year));
+    dispatchChange(monthInput);
+    dispatchChange(yearInput);
+    return true;
+  }
+
   const __oak = {
     queryDeep,
     queryDeepAll(root, selector) {
@@ -329,6 +425,14 @@ function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): stri
         return false;
       }
       if (
+        el.matches?.('button[aria-haspopup="listbox"]') ||
+        el.querySelector?.('button[aria-haspopup="listbox"]') ||
+        el.closest?.('[data-automation-id^="formField-"]')?.querySelector?.('button[aria-haspopup="listbox"]') ||
+        el.closest?.('fieldset')?.querySelector?.('button[aria-haspopup="listbox"]')
+      ) {
+        return selectWorkdayDropdownOption(el, text, timeoutMs);
+      }
+      if (
         el.getAttribute?.('role') === 'combobox' ||
         el.classList?.contains('dropdown-select') ||
         el.classList?.contains('dropdown-search') ||
@@ -337,6 +441,12 @@ function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): stri
         return clickIcimsDropdownOption(el, text, timeoutMs);
       }
       return false;
+    },
+    async selectWorkdayDropdownOption(target, optionText, timeoutMs) {
+      return selectWorkdayDropdownOption(target, optionText, timeoutMs);
+    },
+    setWorkdayDate(target, month, year) {
+      return setWorkdayDate(target, month, year);
     },
     setValue(el, value) {
       if (!el) throw new Error('Element not found');

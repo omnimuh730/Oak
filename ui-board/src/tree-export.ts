@@ -4,7 +4,7 @@ export interface PureNode {
   tag: string;
   id: number;
   text?: string;
-  /** Input-only: key=value attrs e.g. type=file name=email */
+  /** Useful form/control attrs e.g. type=file name=email aria-required=true */
   detail?: string;
   children: PureNode[];
 }
@@ -17,7 +17,38 @@ export interface MetaNode {
   children: MetaNode[];
 }
 
-const INPUT_ATTR_KEYS = ['type', 'name', 'placeholder', 'value', 'role'] as const;
+const DETAIL_TAGS = new Set([
+  'a',
+  'button',
+  'fieldset',
+  'form',
+  'input',
+  'label',
+  'li',
+  'option',
+  'select',
+  'textarea',
+]);
+
+const DETAIL_ATTR_KEYS = [
+  'for',
+  'type',
+  'role',
+  'name',
+  'aria-label',
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-required',
+  'aria-invalid',
+  'aria-checked',
+  'autocomplete',
+  'placeholder',
+  'value',
+  'data-automation-id',
+  'data-fkit-id',
+  'selected',
+  'checked',
+] as const;
 
 export function splitDomTree(root: DomNode): { pure: PureNode; meta: MetaNode } {
   return {
@@ -33,13 +64,20 @@ function toPureNode(node: DomNode): PureNode {
     children: node.children.map(toPureNode),
   };
   if (node.text) pure.text = node.text;
-  if (node.tag === 'input' && node.attrs) {
-    const parts = INPUT_ATTR_KEYS.filter((k) => node.attrs?.[k]).map(
-      (k) => `${k}=${node.attrs![k]}`,
-    );
+  if (DETAIL_TAGS.has(node.tag) && (node.attrs || node.id)) {
+    const parts: string[] = [];
+    if (node.id) parts.push(`domId=${node.id}`);
+    for (const key of DETAIL_ATTR_KEYS) {
+      const value = node.attrs?.[key];
+      if (value) parts.push(`${key}=${formatDetailValue(value)}`);
+    }
     if (parts.length > 0) pure.detail = parts.join(' ');
   }
   return pure;
+}
+
+function formatDetailValue(value: string): string {
+  return /\s/.test(value) ? JSON.stringify(value) : value;
 }
 
 function toMetaNode(node: DomNode): MetaNode {
