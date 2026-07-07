@@ -1,5 +1,3 @@
-import { runUnsafeCode } from './injected/run-unsafe-code';
-
 export function urlsMatch(frameUrl: string, expectedUrl: string): boolean {
   if (frameUrl === expectedUrl) return true;
 
@@ -12,11 +10,6 @@ export function urlsMatch(frameUrl: string, expectedUrl: string): boolean {
   }
 }
 
-function isCspEvalError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /EvalError|Content Security Policy|unsafe-eval|Refused to evaluate/i.test(msg);
-}
-
 function isDebuggerUnavailableError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /another debugger|debugger is not attached|debugger permission|cannot access/i.test(msg);
@@ -25,11 +18,9 @@ function isDebuggerUnavailableError(err: unknown): boolean {
 function formatDebuggerUnavailableError(err: unknown): Error {
   const msg = err instanceof Error ? err.message : String(err);
   return new Error(
-    `Strict CSP pages require Oak's debugger eval path. Close Chrome DevTools for this tab, then run Script Eval again. (${msg})`,
+    `Script Eval uses Oak's debugger eval path to avoid page CSP. Close Chrome DevTools for this tab, then run Script Eval again. (${msg})`,
   );
 }
-
-type EvalWorld = 'MAIN' | 'ISOLATED';
 
 type DebuggerEvalResponse = {
   result?: {
@@ -55,26 +46,6 @@ type DebuggerFrameTree = {
   frame?: { id?: string; url?: string };
   childFrames?: DebuggerFrameTree[];
 };
-
-async function runEvalInWorld(
-  tabId: number,
-  frameId: number,
-  code: string,
-  world: EvalWorld,
-): Promise<string> {
-  const [injection] = await chrome.scripting.executeScript({
-    target: { tabId, frameIds: [frameId] },
-    ...(world === 'MAIN' ? { world: 'MAIN' as const } : {}),
-    func: runUnsafeCode,
-    args: [code],
-  });
-
-  if (injection?.result === undefined) {
-    throw new Error('Script eval returned no result');
-  }
-
-  return injection.result;
-}
 
 function debuggerTarget(tabId: number): chrome.debugger.Debuggee {
   return { tabId };
@@ -276,15 +247,6 @@ ${userCode}
 `;
 }
 
-function shouldUseDebuggerFirst(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname;
-    return hostname === 'ashbyhq.com' || hostname.endsWith('.ashbyhq.com');
-  } catch {
-    return false;
-  }
-}
-
 async function createDebuggerWorld(
   tabId: number,
   frameUrl: string,
@@ -441,33 +403,15 @@ export async function evalScriptInTab(
   frameId?: number,
   oakNodeId?: number,
 ): Promise<string> {
-  const targetFrameId = await findFrameId(tabId, url, frameId, oakNodeId);
-
-  if (shouldUseDebuggerFirst(url)) {
-    try {
-      return await runEvalWithDebugger(tabId, code, url);
-    } catch (err) {
-      if (isDebuggerUnavailableError(err)) {
-        throw formatDebuggerUnavailableError(err);
-      }
-      throw err instanceof Error ? err : new Error(String(err));
-    }
-  }
-
   try {
-    return await runEvalInWorld(tabId, targetFrameId, code, 'ISOLATED');
-  } catch (isolatedErr) {
-    if (isCspEvalError(isolatedErr)) {
-      return runEvalWithDebugger(tabId, code, url);
+    const targetFrameId = await findFrameId(tabId, url, frameId, oakNodeId);
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    const targetFrameUrl = frames?.find((f) => f.frameId === targetFrameId)?.url || url;
+    return await runEvalWithDebugger(tabId, code, targetFrameUrl);
+  } catch (err) {
+    if (isDebuggerUnavailableError(err)) {
+      throw formatDebuggerUnavailableError(err);
     }
-
-    try {
-      return await runEvalInWorld(tabId, targetFrameId, code, 'MAIN');
-    } catch (mainErr) {
-      if (isCspEvalError(mainErr)) {
-        return runEvalWithDebugger(tabId, code, url);
-      }
-      throw mainErr instanceof Error ? mainErr : new Error(String(mainErr));
-    }
+    throw err instanceof Error ? err : new Error(String(err));
   }
 }

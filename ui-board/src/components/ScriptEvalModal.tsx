@@ -12,7 +12,7 @@ interface Props {
   onRun: () => void;
 }
 
-const PLACEHOLDER = `// Runs with DOM access. Strict CSP pages use debugger evaluation.
+const PLACEHOLDER = `// Runs with DOM access through Oak's debugger evaluator.
 // __oak pierces same-origin iframes and helps fill inputs.
 
 const input = await __oak.waitFor('[data-oak-id="248"]', 10000);
@@ -42,7 +42,7 @@ export function ScriptEvalModal({
 
         <div className="script-eval-body">
           <p className="script-eval-hint">
-            JavaScript runs unsafely with full DOM access. Strict CSP pages use debugger evaluation; close Chrome DevTools for that tab before running.
+            JavaScript runs unsafely with full DOM access through Oak's debugger evaluator; close Chrome DevTools for that tab before running.
           </p>
           <textarea
             className="script-eval-input"
