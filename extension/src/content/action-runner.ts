@@ -35,6 +35,19 @@ async function typeText(el: HTMLElement, text: string): Promise<void> {
     }
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    try {
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+    } catch {
+      // InputEvent unsupported in some contexts
+    }
+    const jq = (el.ownerDocument.defaultView as unknown as {
+      jQuery?: (sel: string | Element) => { val: (v: string) => { trigger: (e: string) => void } };
+    })?.jQuery;
+    if (jq) {
+      const chain = el.id ? jq(`#${el.id}`).val(text) : jq(el).val(text);
+      chain.trigger('input');
+      chain.trigger('change');
+    }
     return;
   }
 

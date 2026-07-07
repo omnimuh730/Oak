@@ -64,5 +64,6 @@ export interface EvalScriptPayload {
   url: string;
   code: string;
   frameId?: number;
+  oakNodeId?: number;
   extensionId?: string;
 }

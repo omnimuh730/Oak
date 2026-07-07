@@ -12,11 +12,12 @@ interface Props {
   onRun: () => void;
 }
 
-const PLACEHOLDER = `// Runs in the page MAIN world. Helpers: __oak.byId, __oak.byOakId, __oak.setValue
-// Greenhouse/React inputs need __oak.setValue (plain .value is ignored).
+const PLACEHOLDER = `// __oak helpers pierce same-origin iframes and shadow DOM.
+// byOakId, byId, setValue (jQuery-aware), waitFor(selector|fn, ms)
 
-__oak.setValue(__oak.byOakId(461), '5551234567');
-return __oak.byOakId(461)?.value;`;
+const input = await __oak.waitFor('[data-oak-id="248"]', 10000);
+__oak.setValue(input, 'you@example.com');
+return input.value;`;
 
 export function ScriptEvalModal({
   pageLabel,

@@ -96,7 +96,7 @@ function connectSocket(serverUrl: string) {
     }
 
     try {
-      const result = await evalScriptInTab(tabId, url, code, payload.frameId);
+      const result = await evalScriptInTab(tabId, url, code, payload.frameId, payload.oakNodeId);
       ack?.({ ok: true, result });
     } catch (err) {
       ack?.({ error: err instanceof Error ? err.message : String(err) });

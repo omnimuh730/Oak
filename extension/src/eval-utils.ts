@@ -12,12 +12,44 @@ export function urlsMatch(frameUrl: string, expectedUrl: string): boolean {
   }
 }
 
-async function frameHasOakMarkers(tabId: number, frameId: number): Promise<boolean> {
+async function frameContainsOakId(
+  tabId: number,
+  frameId: number,
+  oakNodeId: number,
+): Promise<boolean> {
   try {
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [frameId] },
       world: 'MAIN',
-      func: () => document.querySelector('[data-oak-id]') != null,
+      func: (nodeId: number) => {
+        function queryDeep(root: Document | Element | ShadowRoot, sel: string): Element | null {
+          if ('querySelector' in root) {
+            const direct = root.querySelector(sel);
+            if (direct) return direct;
+          }
+          const nodes = 'querySelectorAll' in root ? root.querySelectorAll('*') : [];
+          for (const child of Array.from(nodes)) {
+            if (child.shadowRoot) {
+              const found = queryDeep(child.shadowRoot, sel);
+              if (found) return found;
+            }
+            if (child.tagName === 'IFRAME') {
+              try {
+                const doc = (child as HTMLIFrameElement).contentDocument;
+                if (doc) {
+                  const found = queryDeep(doc, `[data-oak-id="${nodeId}"]`);
+                  if (found) return found;
+                }
+              } catch {
+                // cross-origin iframe
+              }
+            }
+          }
+          return null;
+        }
+        return queryDeep(document, `[data-oak-id="${nodeId}"]`) != null;
+      },
+      args: [oakNodeId],
     });
     return Boolean(injection?.result);
   } catch {
@@ -25,37 +57,47 @@ async function frameHasOakMarkers(tabId: number, frameId: number): Promise<boole
   }
 }
 
+async function findFrameForOakId(
+  tabId: number,
+  oakNodeId: number,
+  frames: chrome.webNavigation.GetAllFrameResultDetails[],
+): Promise<number | null> {
+  for (const frame of frames) {
+    if (await frameContainsOakId(tabId, frame.frameId, oakNodeId)) {
+      return frame.frameId;
+    }
+  }
+  return null;
+}
+
 export async function findFrameId(
   tabId: number,
   expectedUrl: string,
   preferredFrameId?: number,
+  oakNodeId?: number,
 ): Promise<number> {
   const frames = await chrome.webNavigation.getAllFrames({ tabId });
   if (!frames?.length) throw new Error('No frames found in tab');
+
+  if (oakNodeId != null) {
+    const frameWithNode = await findFrameForOakId(tabId, oakNodeId, frames);
+    if (frameWithNode != null) return frameWithNode;
+  }
 
   if (preferredFrameId != null) {
     const preferred = frames.find((f) => f.frameId === preferredFrameId);
     if (preferred) return preferred.frameId;
   }
 
-  const candidates = frames.filter(
-    (f) => f.url === expectedUrl || urlsMatch(f.url, expectedUrl),
-  );
+  // Eval helpers pierce same-origin child iframes — run from the top frame when possible.
+  const top = frames.find((f) => f.parentFrameId === -1);
+  if (top) return top.frameId;
 
-  for (const frame of candidates) {
-    if (await frameHasOakMarkers(tabId, frame.frameId)) {
-      return frame.frameId;
-    }
-  }
-
-  const exact = candidates[0] ?? frames.find((f) => f.url === expectedUrl);
+  const exact = frames.find((f) => f.url === expectedUrl);
   if (exact) return exact.frameId;
 
   const loose = frames.find((f) => urlsMatch(f.url, expectedUrl));
   if (loose) return loose.frameId;
-
-  const top = frames.find((f) => f.parentFrameId === -1);
-  if (top) return top.frameId;
 
   return frames[0].frameId;
 }
@@ -65,8 +107,9 @@ export async function evalScriptInTab(
   url: string,
   code: string,
   frameId?: number,
+  oakNodeId?: number,
 ): Promise<string> {
-  const targetFrameId = await findFrameId(tabId, url, frameId);
+  const targetFrameId = await findFrameId(tabId, url, frameId, oakNodeId);
 
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId, frameIds: [targetFrameId] },

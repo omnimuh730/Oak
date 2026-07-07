@@ -31,6 +31,7 @@ export default function App() {
   const [actionRunning, setActionRunning] = useState(false);
   const [scriptEvalOpen, setScriptEvalOpen] = useState(false);
   const [scriptEvalCode, setScriptEvalCode] = useState('');
+  const [scriptEvalOakNodeId, setScriptEvalOakNodeId] = useState<number | null>(null);
   const [scriptEvalRunning, setScriptEvalRunning] = useState(false);
   const [scriptEvalOutput, setScriptEvalOutput] = useState<string | null>(null);
   const [scriptEvalError, setScriptEvalError] = useState<string | null>(null);
@@ -170,16 +171,18 @@ export default function App() {
     );
   };
 
-  const openScriptEval = () => {
+  const openScriptEval = (oakNodeId?: number) => {
     closeContextMenu();
     setScriptEvalOutput(null);
     setScriptEvalError(null);
+    setScriptEvalOakNodeId(oakNodeId ?? null);
     setScriptEvalOpen(true);
   };
 
   const closeScriptEval = () => {
     if (scriptEvalRunning) return;
     setScriptEvalOpen(false);
+    setScriptEvalOakNodeId(null);
     setScriptEvalOutput(null);
     setScriptEvalError(null);
   };
@@ -206,6 +209,7 @@ export default function App() {
       {
         tabId,
         frameId: frameId ?? undefined,
+        oakNodeId: scriptEvalOakNodeId ?? undefined,
         url: latestTree.url,
         code: scriptEvalCode,
         extensionId: latestTree.meta?.from,
@@ -322,7 +326,7 @@ export default function App() {
             <div className="tree-actions">
               <button type="button" onClick={openPureTreeModal}>Pure Tree</button>
               <button type="button" onClick={openMetaTreeModal}>Meta Tree</button>
-              <button type="button" onClick={openScriptEval}>Script Eval</button>
+              <button type="button" onClick={() => openScriptEval()}>Script Eval</button>
               <button type="button" className="primary" onClick={copyForAnalyze}>
                 Copy for Analyze
               </button>
@@ -378,7 +382,7 @@ export default function App() {
         onClose={closeContextMenu}
         onGetInnerHtml={() => fetchContent('innerHTML')}
         onGetInnerText={() => fetchContent('innerText')}
-        onScriptEval={openScriptEval}
+        onScriptEval={() => openScriptEval(contextNode?.nodeId)}
         onAction={() => {
           closeContextMenu();
           if (contextNode) setActionModalNode(contextNode);
