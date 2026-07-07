@@ -59,6 +59,13 @@ export interface ExecuteActionsPayload {
   steps: ActionStep[];
 }
 
+export interface AttachedFile {
+  key: string;
+  name: string;
+  mimeType: string;
+  base64: string;
+}
+
 export interface EvalScriptPayload {
   tabId: number;
   url: string;
@@ -66,4 +73,5 @@ export interface EvalScriptPayload {
   frameId?: number;
   oakNodeId?: number;
   extensionId?: string;
+  files?: AttachedFile[];
 }

@@ -1,3 +1,5 @@
+import type { AttachedFile } from './types';
+
 export function urlsMatch(frameUrl: string, expectedUrl: string): boolean {
   if (frameUrl === expectedUrl) return true;
 
@@ -112,9 +114,38 @@ function formatDebuggerResult(response: DebuggerEvalResponse): string {
   return remote.type ?? 'undefined';
 }
 
-function buildDebuggerExpression(userCode: string): string {
+function buildOakFilesMap(files?: AttachedFile[]): Record<string, { name: string; mimeType: string; base64: string }> {
+  const map: Record<string, { name: string; mimeType: string; base64: string }> = {};
+  if (!files?.length) return map;
+  for (const file of files) {
+    if (!file.key) continue;
+    map[file.key] = { name: file.name, mimeType: file.mimeType, base64: file.base64 };
+  }
+  return map;
+}
+
+function buildDebuggerExpression(userCode: string, files?: AttachedFile[]): string {
+  const oakFilesJson = JSON.stringify(buildOakFilesMap(files));
   return `
 (async () => {
+  const __oakAttachedFiles = ${oakFilesJson};
+  window.OAK_ATTACHED_FILES = __oakAttachedFiles;
+  window.attachDroppedFile = function(input, fileKey) {
+    const meta = __oakAttachedFiles[fileKey];
+    if (!meta) throw new Error('Unknown file key: ' + fileKey);
+    if (!input || input.type !== 'file') throw new Error('Not a file input');
+    const binary = atob(meta.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const file = new File([bytes], meta.name, { type: meta.mimeType });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return input;
+  };
+
   function queryDeep(root, selector) {
     if (root && 'querySelector' in root) {
       const direct = root.querySelector(selector);
@@ -289,11 +320,12 @@ async function runEvalWithDebugger(
   tabId: number,
   code: string,
   frameUrl: string,
+  files?: AttachedFile[],
 ): Promise<string> {
   await attachDebugger(tabId);
   try {
     const contextId = await createDebuggerWorld(tabId, frameUrl);
-    const expression = buildDebuggerExpression(code);
+    const expression = buildDebuggerExpression(code, files);
     const response = await sendDebuggerCommand<DebuggerEvalResponse>(tabId, 'Runtime.evaluate', {
       expression,
       ...(contextId != null ? { contextId } : {}),
@@ -402,12 +434,13 @@ export async function evalScriptInTab(
   code: string,
   frameId?: number,
   oakNodeId?: number,
+  files?: AttachedFile[],
 ): Promise<string> {
   try {
     const targetFrameId = await findFrameId(tabId, url, frameId, oakNodeId);
     const frames = await chrome.webNavigation.getAllFrames({ tabId });
     const targetFrameUrl = frames?.find((f) => f.frameId === targetFrameId)?.url || url;
-    return await runEvalWithDebugger(tabId, code, targetFrameUrl);
+    return await runEvalWithDebugger(tabId, code, targetFrameUrl, files);
   } catch (err) {
     if (isDebuggerUnavailableError(err)) {
       throw formatDebuggerUnavailableError(err);

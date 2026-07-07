@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { ActionStep } from './automation-types';
+import type { ActionStep, AttachedFile } from './automation-types';
 import type { ClientInfo, DomNode, DomTreeMessage, HighlightPayload } from './types';
 import {
   formatMetaTreePreview,
@@ -16,6 +16,19 @@ import { ScriptEvalModal } from './components/ScriptEvalModal';
 import './App.css';
 
 const DEFAULT_SERVER = 'http://localhost:3847';
+const DEFAULT_AI_SERVER = import.meta.env.VITE_AI_SERVER_URL || 'http://localhost:3848';
+const RESUME_FILE_KEY = 'eli_taylor';
+
+interface GenerateEvalScriptResponse {
+  ok?: boolean;
+  code?: string;
+  error?: string;
+}
+
+interface ResumeAttachmentResponse {
+  file?: AttachedFile;
+  error?: string;
+}
 
 export default function App() {
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
@@ -31,8 +44,10 @@ export default function App() {
   const [actionRunning, setActionRunning] = useState(false);
   const [scriptEvalOpen, setScriptEvalOpen] = useState(false);
   const [scriptEvalCode, setScriptEvalCode] = useState('');
+  const [scriptEvalFiles, setScriptEvalFiles] = useState<AttachedFile[]>([]);
   const [scriptEvalOakNodeId, setScriptEvalOakNodeId] = useState<number | null>(null);
   const [scriptEvalRunning, setScriptEvalRunning] = useState(false);
+  const [autoGenerateRunning, setAutoGenerateRunning] = useState(false);
   const [scriptEvalOutput, setScriptEvalOutput] = useState<string | null>(null);
   const [scriptEvalError, setScriptEvalError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -183,55 +198,63 @@ export default function App() {
     if (scriptEvalRunning) return;
     setScriptEvalOpen(false);
     setScriptEvalOakNodeId(null);
+    setScriptEvalFiles([]);
     setScriptEvalOutput(null);
     setScriptEvalError(null);
   };
 
-  const runScriptEval = () => {
-    if (!latestTree || !scriptEvalCode.trim()) return;
+  const runScriptEval = useCallback(
+    (override?: { code?: string; files?: AttachedFile[]; oakNodeId?: number | null }) => {
+      const code = override?.code ?? scriptEvalCode;
+      const files = override?.files ?? scriptEvalFiles;
+      const oakNodeId = override?.oakNodeId ?? scriptEvalOakNodeId;
+      if (!latestTree || !code.trim()) return;
 
-    const tabId = latestTree.meta?.tabId ?? latestTree.tabId;
-    const frameId = latestTree.meta?.frameId ?? latestTree.frameId;
-    if (!tabId) {
-      showToast('No active page session');
-      return;
-    }
+      const tabId = latestTree.meta?.tabId ?? latestTree.tabId;
+      const frameId = latestTree.meta?.frameId ?? latestTree.frameId;
+      if (!tabId) {
+        showToast('No active page session');
+        return;
+      }
 
-    const socket = socketRef.current;
-    if (!socket) return;
+      const socket = socketRef.current;
+      if (!socket) return;
 
-    setScriptEvalRunning(true);
-    setScriptEvalOutput(null);
-    setScriptEvalError(null);
+      setScriptEvalRunning(true);
+      setScriptEvalOutput(null);
+      setScriptEvalError(null);
 
-    socket.timeout(60000).emit(
-      'dom:eval-script',
-      {
-        tabId,
-        frameId: frameId ?? undefined,
-        oakNodeId: scriptEvalOakNodeId ?? undefined,
-        url: latestTree.url,
-        code: scriptEvalCode,
-        extensionId: latestTree.meta?.from,
-      },
-      (err: Error | null, res: { ok?: boolean; result?: string; error?: string }) => {
-        setScriptEvalRunning(false);
-        if (err) {
-          setScriptEvalError(err.message ?? 'Request failed');
-          return;
-        }
-        if (res?.error) {
-          setScriptEvalError(res.error);
-          return;
-        }
-        if (res?.result === undefined) {
-          setScriptEvalError('Script eval returned no result');
-          return;
-        }
-        setScriptEvalOutput(res.result);
-      },
-    );
-  };
+      socket.timeout(60000).emit(
+        'dom:eval-script',
+        {
+          tabId,
+          frameId: frameId ?? undefined,
+          oakNodeId: oakNodeId ?? undefined,
+          url: latestTree.url,
+          code,
+          extensionId: latestTree.meta?.from,
+          files: files.length ? files : undefined,
+        },
+        (err: Error | null, res: { ok?: boolean; result?: string; error?: string }) => {
+          setScriptEvalRunning(false);
+          if (err) {
+            setScriptEvalError(err.message ?? 'Request failed');
+            return;
+          }
+          if (res?.error) {
+            setScriptEvalError(res.error);
+            return;
+          }
+          if (res?.result === undefined) {
+            setScriptEvalError('Script eval returned no result');
+            return;
+          }
+          setScriptEvalOutput(res.result);
+        },
+      );
+    },
+    [latestTree, scriptEvalCode, scriptEvalFiles, scriptEvalOakNodeId],
+  );
 
   const nodeCount = latestTree?.meta?.nodeCount ?? countNodes(latestTree?.tree);
 
@@ -249,6 +272,60 @@ export default function App() {
     });
     await navigator.clipboard.writeText(text);
     showToast('Copied for analyze');
+  };
+
+  const handleAutoGenerateRun = async () => {
+    if (!latestTree || !splitTrees) return;
+
+    setAutoGenerateRunning(true);
+    setScriptEvalOutput(null);
+    setScriptEvalError(null);
+
+    try {
+      const analyzeText = formatPureTreeForAnalyze(splitTrees.pure, {
+        title: latestTree.title || 'Untitled',
+        url: latestTree.url,
+        fetchedAt: latestTree.fetchedAt,
+      });
+
+      const generation = await fetchJson<GenerateEvalScriptResponse>(
+        `${DEFAULT_AI_SERVER}/api/generate-eval-script`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            analyzeText,
+            page: {
+              title: latestTree.title || 'Untitled',
+              url: latestTree.url,
+              fetchedAt: latestTree.fetchedAt,
+            },
+            resumeKey: RESUME_FILE_KEY,
+          }),
+        },
+      );
+
+      const generatedCode = generation.code?.trim();
+      if (!generatedCode) {
+        throw new Error(generation.error || 'AI backend returned no eval script');
+      }
+
+      const filesForRun = await ensureRuntimeResumeFile(generatedCode, scriptEvalFiles);
+      setScriptEvalCode(generatedCode);
+      setScriptEvalFiles(filesForRun);
+      setScriptEvalOakNodeId(null);
+      setScriptEvalOpen(true);
+      showToast('Generated eval script; running now');
+
+      runScriptEval({ code: generatedCode, files: filesForRun, oakNodeId: null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setScriptEvalOpen(true);
+      setScriptEvalError(message);
+      showToast('Auto generate run failed');
+    } finally {
+      setAutoGenerateRunning(false);
+    }
   };
 
   const openPureTreeModal = () => {
@@ -327,6 +404,18 @@ export default function App() {
               <button type="button" onClick={openPureTreeModal}>Pure Tree</button>
               <button type="button" onClick={openMetaTreeModal}>Meta Tree</button>
               <button type="button" onClick={() => openScriptEval()}>Script Eval</button>
+              <button
+                type="button"
+                className="primary"
+                disabled={autoGenerateRunning || scriptEvalRunning}
+                onClick={handleAutoGenerateRun}
+              >
+                {autoGenerateRunning
+                  ? 'Generating...'
+                  : scriptEvalRunning
+                    ? 'Running...'
+                    : 'Auto Generate Run'}
+              </button>
               <button type="button" className="primary" onClick={copyForAnalyze}>
                 Copy for Analyze
               </button>
@@ -413,7 +502,9 @@ export default function App() {
           output={scriptEvalOutput}
           error={scriptEvalError}
           code={scriptEvalCode}
+          files={scriptEvalFiles}
           onCodeChange={setScriptEvalCode}
+          onFilesChange={setScriptEvalFiles}
           onClose={closeScriptEval}
           onRun={runScriptEval}
         />
@@ -421,6 +512,42 @@ export default function App() {
 
       {toast && <div className="toast">{toast}</div>}
     </div>
+  );
+}
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = typeof data?.error === 'string' ? data.error : `Request failed: ${res.status}`;
+    throw new Error(message);
+  }
+  return data as T;
+}
+
+async function ensureRuntimeResumeFile(code: string, existingFiles: AttachedFile[]): Promise<AttachedFile[]> {
+  if (!usesRuntimeResumeFile(code) || existingFiles.some((file) => file.key === RESUME_FILE_KEY)) {
+    return existingFiles;
+  }
+
+  const data = await fetchJson<ResumeAttachmentResponse>(
+    `${DEFAULT_AI_SERVER}/api/resume-attachment`,
+  );
+  if (!data.file) {
+    throw new Error(data.error || `AI backend did not return ${RESUME_FILE_KEY}`);
+  }
+
+  return [
+    ...existingFiles.filter((file) => file.key !== data.file?.key),
+    data.file,
+  ];
+}
+
+function usesRuntimeResumeFile(code: string): boolean {
+  return (
+    code.includes('attachDroppedFile') ||
+    code.includes(`'${RESUME_FILE_KEY}'`) ||
+    code.includes(`"${RESUME_FILE_KEY}"`)
   );
 }
 

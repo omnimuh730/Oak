@@ -163,6 +163,16 @@
   background: var(--accent-glow);
 }
 
+.tree-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.tree-actions button:disabled:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
 .tree-actions button.primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -171,6 +181,11 @@
 
 .tree-actions button.primary:hover {
   opacity: 0.9;
+}
+
+.tree-actions button.primary:disabled:hover {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .main {
