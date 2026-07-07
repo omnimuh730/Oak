@@ -12,6 +12,33 @@ export function urlsMatch(frameUrl: string, expectedUrl: string): boolean {
   }
 }
 
+function isCspEvalError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /EvalError|Content Security Policy|unsafe-eval|Refused to evaluate/i.test(msg);
+}
+
+type EvalWorld = 'MAIN' | 'ISOLATED';
+
+async function runEvalInWorld(
+  tabId: number,
+  frameId: number,
+  code: string,
+  world: EvalWorld,
+): Promise<string> {
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [frameId] },
+    ...(world === 'MAIN' ? { world: 'MAIN' as const } : {}),
+    func: runUnsafeCode,
+    args: [code],
+  });
+
+  if (injection?.result === undefined) {
+    throw new Error('Script eval returned no result');
+  }
+
+  return injection.result;
+}
+
 async function frameContainsOakId(
   tabId: number,
   frameId: number,
@@ -20,7 +47,6 @@ async function frameContainsOakId(
   try {
     const [injection] = await chrome.scripting.executeScript({
       target: { tabId, frameIds: [frameId] },
-      world: 'MAIN',
       func: (nodeId: number) => {
         function queryDeep(root: Document | Element | ShadowRoot, sel: string): Element | null {
           if ('querySelector' in root) {
@@ -89,7 +115,6 @@ export async function findFrameId(
     if (preferred) return preferred.frameId;
   }
 
-  // Eval helpers pierce same-origin child iframes — run from the top frame when possible.
   const top = frames.find((f) => f.parentFrameId === -1);
   if (top) return top.frameId;
 
@@ -111,16 +136,17 @@ export async function evalScriptInTab(
 ): Promise<string> {
   const targetFrameId = await findFrameId(tabId, url, frameId, oakNodeId);
 
-  const [injection] = await chrome.scripting.executeScript({
-    target: { tabId, frameIds: [targetFrameId] },
-    world: 'MAIN',
-    func: runUnsafeCode,
-    args: [code],
-  });
-
-  if (injection?.result === undefined) {
-    throw new Error('Script eval returned no result');
+  // Isolated extension world is NOT subject to page CSP — primary path for Ashby etc.
+  try {
+    return await runEvalInWorld(tabId, targetFrameId, code, 'ISOLATED');
+  } catch (isolatedErr) {
+    try {
+      return await runEvalInWorld(tabId, targetFrameId, code, 'MAIN');
+    } catch (mainErr) {
+      if (isCspEvalError(mainErr) && !isCspEvalError(isolatedErr)) {
+        throw isolatedErr instanceof Error ? isolatedErr : new Error(String(isolatedErr));
+      }
+      throw mainErr instanceof Error ? mainErr : new Error(String(mainErr));
+    }
   }
-
-  return injection.result;
 }

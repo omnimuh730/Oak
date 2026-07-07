@@ -12,8 +12,8 @@ interface Props {
   onRun: () => void;
 }
 
-const PLACEHOLDER = `// __oak helpers pierce same-origin iframes and shadow DOM.
-// byOakId, byId, setValue (jQuery-aware), waitFor(selector|fn, ms)
+const PLACEHOLDER = `// Runs in extension context (bypasses page CSP on strict sites like Ashby).
+// __oak pierces same-origin iframes. Page globals (window.Foo) only work when CSP allows MAIN world.
 
 const input = await __oak.waitFor('[data-oak-id="248"]', 10000);
 __oak.setValue(input, 'you@example.com');
@@ -42,7 +42,7 @@ export function ScriptEvalModal({
 
         <div className="script-eval-body">
           <p className="script-eval-hint">
-            JavaScript runs unsafely in the live page context. Use with care.
+            JavaScript runs unsafely with full DOM access. Strict sites (Ashby, etc.) use extension context to bypass CSP.
           </p>
           <textarea
             className="script-eval-input"

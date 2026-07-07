@@ -1,5 +1,6 @@
 /**
- * Injected into the page MAIN world via chrome.scripting.executeScript.
+ * Injected via chrome.scripting.executeScript (MAIN or isolated world).
+ * Isolated world bypasses page CSP; MAIN allows page-global access when CSP permits.
  * Must stay self-contained — no imports.
  */
 export function runUnsafeCode(userCode: string): Promise<string> {
@@ -73,9 +74,9 @@ export function runUnsafeCode(userCode: string): Promise<string> {
         } catch (e) {}
 
         if (typeof jQuery !== 'undefined' && jQuery.fn && el.id) {
-          jQuery('#' + el.id).val(value).trigger('input').trigger('change');
+          try { jQuery('#' + el.id).val(value).trigger('input').trigger('change'); } catch (e) {}
         } else if (typeof jQuery !== 'undefined' && jQuery.fn) {
-          jQuery(el).val(value).trigger('input').trigger('change');
+          try { jQuery(el).val(value).trigger('input').trigger('change'); } catch (e) {}
         }
 
         el.dispatchEvent(new Event('blur', { bubbles: true }));
