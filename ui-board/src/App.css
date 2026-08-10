@@ -26,14 +26,12 @@
 }
 
 .logo {
-  font-size: 28px;
   width: 44px;
   height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent-glow);
+  display: block;
+  object-fit: cover;
   border-radius: 12px;
+  box-shadow: 0 0 0 1px rgba(61, 122, 86, 0.35);
 }
 
 .header h1 {

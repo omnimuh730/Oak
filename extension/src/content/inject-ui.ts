@@ -38,8 +38,9 @@ function mountOakUI(): void {
   fab.className = 'oak-fab';
   fab.title = 'Run Oak: Fetch → Analyze → Fill';
   fab.type = 'button';
+  const iconUrl = chrome.runtime.getURL('public/icon-48.png');
   fab.innerHTML = `
-    <span class="oak-fab-icon">🌳</span>
+    <img class="oak-fab-icon" src="${iconUrl}" alt="" width="22" height="22" />
     <span class="oak-fab-status" hidden></span>
   `;
   shadow.appendChild(fab);
@@ -49,7 +50,7 @@ function mountOakUI(): void {
   sidebar.className = 'oak-sidebar';
   sidebar.innerHTML = `
     <div class="oak-sidebar-header">
-      <span class="oak-logo">🌳 Oak</span>
+      <span class="oak-logo"><img src="${iconUrl}" alt="" width="20" height="20" /> Oak</span>
       <button class="oak-close" title="Close">✕</button>
     </div>
     <iframe class="oak-sidebar-frame" src="${chrome.runtime.getURL('sidebar.html')}" allow="clipboard-read; clipboard-write"></iframe>
@@ -58,7 +59,7 @@ function mountOakUI(): void {
 
   const closeBtn = sidebar.querySelector('.oak-close') as HTMLButtonElement;
   const statusEl = fab.querySelector('.oak-fab-status') as HTMLSpanElement;
-  const iconEl = fab.querySelector('.oak-fab-icon') as HTMLSpanElement;
+  const iconEl = fab.querySelector('.oak-fab-icon') as HTMLImageElement;
 
   let open = false;
   let pipelineBusy = false;
@@ -222,7 +223,14 @@ const STYLES = `
     background: linear-gradient(135deg, #8b3a3a, #6b2a2a);
   }
 
-  .oak-fab-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+  .oak-fab-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    display: block;
+  }
 
   .oak-fab-status {
     font-size: 12px;
@@ -269,9 +277,17 @@ const STYLES = `
   }
 
   .oak-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-size: 15px;
     font-weight: 600;
     color: #e8eaef;
+  }
+
+  .oak-logo img {
+    border-radius: 5px;
+    object-fit: cover;
   }
 
   .oak-close {

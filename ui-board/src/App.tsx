@@ -312,7 +312,7 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="header-left">
-          <div className="logo">🌳</div>
+          <img className="logo" src="/logo.png" alt="Oak" width={44} height={44} />
           <div>
             <h1>Oak DOM Tree Board</h1>
             <p className="subtitle">Live DOM snapshots from the Chrome extension</p>
