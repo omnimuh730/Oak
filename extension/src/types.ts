@@ -19,6 +19,7 @@ export interface DomTreePayload {
 }
 
 export const DEFAULT_SERVER = 'http://localhost:3847';
+export const DEFAULT_AI_SERVER = 'http://localhost:3848';
 
 export const MSG = {
   TOGGLE_SIDEBAR: 'oak:toggle-sidebar',
@@ -30,10 +31,26 @@ export const MSG = {
   EXECUTE_ACTIONS: 'oak:execute-actions',
   PLAN_STEP: 'oak:plan-step',
   DEBUG_LOG: 'oak:debug-log',
+  MATCH_OPTION: 'oak:match-option',
   SIDEBAR_OPEN: 'oak:sidebar-open',
   SIDEBAR_CLOSE: 'oak:sidebar-close',
   SOCKET_STATUS: 'oak:socket-status',
 } as const;
+
+export interface MatchOptionRequest {
+  intendedValue: string;
+  options: string[];
+  fieldLabel?: string | null;
+  typedQuery?: string | null;
+}
+
+export interface MatchOptionResponse {
+  ok?: boolean;
+  matched_option?: string | null;
+  confidence?: number;
+  reason?: string;
+  error?: string;
+}
 
 export type PlanStepActionType =
   | 'fill'

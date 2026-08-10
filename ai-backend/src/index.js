@@ -10,6 +10,7 @@ import {
   PROFILE_PATH,
   RUNTIME_FILE_KEY,
 } from './config.js';
+import { requestOptionMatch } from './match-option.js';
 import { requestActionPlan } from './openai.js';
 import { buildAnalyzePrompt } from './prompt.js';
 
@@ -52,6 +53,39 @@ app.get('/api/runtime-file', async (_req, res) => {
     res.status(404).json({
       error: `Runtime file not found at ${FILE_PATH}`,
       detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+app.post('/api/match-option', async (req, res) => {
+  try {
+    const {
+      intendedValue,
+      options,
+      fieldLabel = null,
+      typedQuery = null,
+    } = req.body ?? {};
+
+    if (!intendedValue || typeof intendedValue !== 'string') {
+      res.status(400).json({ error: 'intendedValue is required' });
+      return;
+    }
+    if (!Array.isArray(options) || options.length === 0) {
+      res.status(400).json({ error: 'options must be a non-empty string array' });
+      return;
+    }
+
+    const result = await requestOptionMatch({
+      intendedValue,
+      options,
+      fieldLabel,
+      typedQuery,
+    });
+
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
     });
   }
 });

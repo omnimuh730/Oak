@@ -132,13 +132,15 @@ function roleMatches(expected: string, actual: string, el: Element): boolean {
   if (exp === act) return true;
 
   const aliases: Record<string, string[]> = {
-    textbox: ['textbox', 'text', 'input', 'searchbox', 'email', 'tel', 'url'],
+    textbox: ['textbox', 'text', 'input', 'searchbox', 'email', 'tel', 'url', 'spinbutton'],
+    spinbutton: ['spinbutton', 'textbox', 'text', 'input', 'number'],
     combobox: ['combobox', 'select', 'listbox', 'dropdown'],
     file: ['file', 'upload'],
     radio: ['radio', 'radiogroup'],
     checkbox: ['checkbox'],
     button: ['button'],
     'submit button': ['submit button', 'button', 'submit'],
+    textarea: ['textarea', 'textbox', 'text', 'input'],
   };
 
   for (const [canonical, list] of Object.entries(aliases)) {
@@ -158,10 +160,13 @@ function roleMatches(expected: string, actual: string, el: Element): boolean {
 function labelMatches(expected: string, candidates: string[]): boolean {
   const exp = normalize(expected);
   if (!exp) return true;
-  const expBare = exp.replace(/\*$/, '').trim();
+  const expBare = exp.replace(/[?*]+$/g, '').trim();
   return candidates.some((c) => {
-    const n = normalize(c).replace(/\*$/, '').trim();
-    return n === exp || n === expBare || n.includes(expBare) || expBare.includes(n);
+    const n = normalize(c).replace(/[?*]+$/g, '').trim();
+    if (n === exp || n === expBare || n.includes(expBare) || expBare.includes(n)) return true;
+    // Plans often truncate long Greenhouse labels; require a long shared prefix.
+    const prefixLen = Math.min(72, expBare.length, n.length);
+    return prefixLen >= 40 && n.slice(0, prefixLen) === expBare.slice(0, prefixLen);
   });
 }
 

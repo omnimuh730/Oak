@@ -1,12 +1,15 @@
 import { io, Socket } from 'socket.io-client';
 import { sendPlanStepToTab } from './tab-messaging';
 import {
+  DEFAULT_AI_SERVER,
   DEFAULT_SERVER,
   MSG,
   type DomTreePayload,
   type ExecuteActionsPayload,
   type GetContentPayload,
   type HighlightPayload,
+  type MatchOptionRequest,
+  type MatchOptionResponse,
   type PlanStepSocketPayload,
 } from './types';
 
@@ -142,6 +145,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       body: JSON.stringify({ sessionId: '69bbda', ...payload }),
     }).catch(() => {});
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (message.type === MSG.MATCH_OPTION) {
+    const body = message.payload as MatchOptionRequest;
+    const base = (message.aiServerUrl as string | undefined) || DEFAULT_AI_SERVER;
+    (async () => {
+      try {
+        const res = await fetch(`${base.replace(/\/$/, '')}/api/match-option`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json().catch(() => ({}))) as MatchOptionResponse;
+        if (!res.ok) {
+          sendResponse({
+            ok: false,
+            matched_option: null,
+            error: data.error || `match-option failed: ${res.status}`,
+          } satisfies MatchOptionResponse);
+          return;
+        }
+        sendResponse(data);
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          matched_option: null,
+          error: err instanceof Error ? err.message : String(err),
+        } satisfies MatchOptionResponse);
+      }
+    })();
     return true;
   }
 
