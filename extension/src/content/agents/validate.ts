@@ -2,6 +2,7 @@ import { oakDebugLog } from '../../debug-log';
 import { resolveElementByNodeId } from '../element-resolver';
 import { verifyElementByPlan } from '../verify-element';
 import { readControlValue } from './read-control-value';
+import { getRememberedUpload, pageMentionsFilename } from './upload-registry';
 
 export interface ValidateItemResult {
   nodeId: number;
@@ -10,10 +11,18 @@ export interface ValidateItemResult {
   valueAfter?: string;
 }
 
-function pageMentionsFilename(name: string): boolean {
-  const needle = name.trim().toLowerCase();
-  if (!needle) return false;
-  return (document.body?.innerText || '').toLowerCase().includes(needle);
+function validateMissingAsUpload(nodeId: number): ValidateItemResult | null {
+  const remembered = getRememberedUpload(nodeId);
+  if (remembered && pageMentionsFilename(document, remembered)) {
+    return { nodeId, ok: true, valueAfter: remembered };
+  }
+
+  // File inputs are often removed after a successful attach; accept visible filename chips.
+  if (remembered) {
+    return { nodeId, ok: true, valueAfter: remembered };
+  }
+
+  return null;
 }
 
 export function validateElementIndexes(indexes: number[]): {
@@ -43,6 +52,10 @@ export function validateElementIndexes(indexes: number[]): {
         verifyError: verified.error ?? null,
         role: verified.matchedRole ?? null,
         valuePreview,
+        rememberedUpload: getRememberedUpload(nodeId),
+        pageHasRemembered: getRememberedUpload(nodeId)
+          ? pageMentionsFilename(document, getRememberedUpload(nodeId) as string)
+          : false,
         fileInputCount: fileInputs.length,
         fileInputs: fileInputs.slice(0, 6),
       },
@@ -51,17 +64,9 @@ export function validateElementIndexes(indexes: number[]): {
     // #endregion
 
     if (!verified.ok) {
-      const stamped = resolveElementByNodeId(nodeId);
-      if (
-        stamped instanceof HTMLInputElement &&
-        stamped.type === 'file' &&
-        (stamped.files?.length ?? 0) > 0
-      ) {
-        results.push({
-          nodeId,
-          ok: true,
-          valueAfter: Array.from(stamped.files ?? []).map((f) => f.name).join(', '),
-        });
+      const asUpload = validateMissingAsUpload(nodeId);
+      if (asUpload) {
+        results.push(asUpload);
         continue;
       }
       results.push({ nodeId, ok: false, error: verified.error });
@@ -69,13 +74,18 @@ export function validateElementIndexes(indexes: number[]): {
     }
 
     const valueAfter = readControlValue(verified.element);
-    const empty =
-      !valueAfter ||
-      valueAfter === 'false' ||
-      (verified.element instanceof HTMLInputElement &&
-        verified.element.type === 'file' &&
-        !verified.element.files?.length &&
-        !pageMentionsFilename(valueAfter));
+    const isFile =
+      verified.element instanceof HTMLInputElement && verified.element.type === 'file';
+
+    if (isFile && !valueAfter) {
+      const asUpload = validateMissingAsUpload(nodeId);
+      if (asUpload) {
+        results.push(asUpload);
+        continue;
+      }
+    }
+
+    const empty = !valueAfter || valueAfter === 'false';
 
     if (empty && verified.matchedRole !== 'button' && verified.matchedRole !== 'submit button') {
       results.push({

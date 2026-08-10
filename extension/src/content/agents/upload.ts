@@ -1,6 +1,7 @@
 import { oakDebugLog } from '../../debug-log';
 import type { RuntimeAttachedFile } from '../../types';
 import { resolveElementByNodeId } from '../element-resolver';
+import { pageMentionsFilename, rememberUploadedFile } from './upload-registry';
 import { waitMs } from './wait';
 
 function base64ToUint8Array(base64: string): Uint8Array {
@@ -40,16 +41,70 @@ function listFileInputs(doc: Document = document): HTMLInputElement[] {
   );
 }
 
-function pageMentionsFilename(doc: Document, name: string): boolean {
-  const needle = name.trim().toLowerCase();
-  if (!needle) return false;
-  return (doc.body?.innerText || '').toLowerCase().includes(needle);
+/** Only treat another file input as a remount of THIS control — never a different oak-id field. */
+function findSuccessorInput(
+  original: HTMLInputElement,
+  target: HTMLInputElement,
+  oakId: string | null,
+  doc: Document,
+): HTMLInputElement | null {
+  const connected = listFileInputs(doc);
+  const sameOak = oakId
+    ? connected.find((node) => node.getAttribute('data-oak-id') === oakId)
+    : null;
+  if (sameOak) return sameOak;
+
+  const form = target.form || original.form;
+  const pool = (form ? connected.filter((node) => node.form === form) : connected).filter((node) => {
+    const id = node.getAttribute('data-oak-id');
+    // A different stamped oak id is a different field (e.g. cover letter vs resume).
+    if (id && oakId && id !== oakId) return false;
+    return true;
+  });
+
+  const unstamped = pool.filter((node) => !node.getAttribute('data-oak-id'));
+  if (original.name) {
+    const byName = unstamped.find((node) => node.name === original.name);
+    if (byName) return byName;
+  }
+
+  return (
+    unstamped.find((node) => node !== target) ||
+    pool.find((node) => node !== target && !node.getAttribute('data-oak-id')) ||
+    null
+  );
 }
 
-/**
- * Some apps remount file inputs on change. Re-apply at most once to a successor.
- * If the control disappears after attach and the filename appears in the page, treat as success.
- */
+async function waitForUploadEvidence(
+  doc: Document,
+  fileName: string,
+  oakId: string | null,
+  maxMs = 4000,
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < maxMs) {
+    if (pageMentionsFilename(doc, fileName)) return true;
+
+    if (oakId) {
+      const el = resolveElementByNodeId(Number(oakId));
+      if (el instanceof HTMLInputElement && el.type === 'file' && (el.files?.length ?? 0) > 0) {
+        return true;
+      }
+    }
+
+    const withFile = listFileInputs(doc).find((node) =>
+      Array.from(node.files ?? []).some((f) => f.name === fileName),
+    );
+    if (withFile) {
+      if (oakId) withFile.setAttribute('data-oak-id', oakId);
+      return true;
+    }
+
+    await waitMs(150);
+  }
+  return false;
+}
+
 async function persistUploadAcrossRemount(
   original: HTMLInputElement,
   fileObj: File,
@@ -57,42 +112,32 @@ async function persistUploadAcrossRemount(
 ): Promise<{ names: string[]; input: HTMLInputElement }> {
   const doc = original.ownerDocument || document;
   let target = original;
-  let names = applyFiles(target, fileObj);
-  let reapplied = false;
+  const names = applyFiles(target, fileObj);
+  const fileName = names[0] || fileObj.name;
 
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await waitMs(120);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await waitMs(150);
 
     if (target.isConnected && (target.files?.length ?? 0) > 0) {
       if (oakId) target.setAttribute('data-oak-id', oakId);
+      rememberUploadedFile(oakId, fileName);
       return { names: Array.from(target.files ?? []).map((f) => f.name), input: target };
     }
 
-    if (names.length && pageMentionsFilename(doc, names[0])) {
+    if (pageMentionsFilename(doc, fileName)) {
       // #region agent log
       oakDebugLog(
         'upload.ts:remount',
         'upload accepted via page filename',
-        { attempt, oakId, names, targetConnected: target.isConnected },
+        { attempt, oakId, fileName, targetConnected: target.isConnected },
         'A',
       );
       // #endregion
-      if (oakId && target.isConnected) target.setAttribute('data-oak-id', oakId);
-      return { names, input: target };
+      rememberUploadedFile(oakId, fileName);
+      return { names: [fileName], input: target };
     }
 
-    const connected = listFileInputs(doc);
-    const form = target.form || original.form;
-    const inForm = form ? connected.filter((node) => node.form === form) : connected;
-    const pool = inForm.length > 0 ? inForm : connected;
-    const successor =
-      (oakId
-        ? pool.find((node) => node.getAttribute('data-oak-id') === oakId)
-        : undefined) ||
-      pool.find((node) => (node.files?.length ?? 0) > 0) ||
-      pool.find((node) => node !== target && (node.files?.length ?? 0) === 0) ||
-      pool.find((node) => node !== target) ||
-      pool[0];
+    const successor = findSuccessorInput(original, target, oakId, doc);
 
     // #region agent log
     oakDebugLog(
@@ -105,9 +150,9 @@ async function persistUploadAcrossRemount(
         targetFiles: target.files?.length ?? 0,
         successorOakId: successor?.getAttribute('data-oak-id') ?? null,
         successorFiles: successor ? successor.files?.length ?? 0 : null,
-        connectedCount: connected.length,
-        pageHasName: names[0] ? pageMentionsFilename(doc, names[0]) : false,
-        reapplied,
+        connectedCount: listFileInputs(doc).length,
+        connectedOakIds: listFileInputs(doc).map((n) => n.getAttribute('data-oak-id')),
+        pageHasName: pageMentionsFilename(doc, fileName),
       },
       'A',
     );
@@ -115,34 +160,51 @@ async function persistUploadAcrossRemount(
 
     if (successor && (successor.files?.length ?? 0) > 0) {
       if (oakId) successor.setAttribute('data-oak-id', oakId);
+      rememberUploadedFile(oakId, fileName);
       return {
         names: Array.from(successor.files ?? []).map((f) => f.name),
         input: successor,
       };
     }
 
-    if (!successor) break;
-
-    // Re-apply once only — a second attach can wipe an already-accepted upload.
-    if (reapplied) {
-      target = successor;
+    if (successor && successor !== target) {
+      // Replacement of THIS control only — re-apply once onto unstamped/same-id successor.
       if (oakId) successor.setAttribute('data-oak-id', oakId);
+      target = successor;
+      applyFiles(target, fileObj);
       continue;
     }
 
-    if (oakId) successor.setAttribute('data-oak-id', oakId);
-    target = successor;
-    names = applyFiles(target, fileObj);
-    reapplied = true;
+    // No safe successor (often the only remaining input is a different field). Wait for UI evidence.
+    break;
   }
 
-  if (target.isConnected && (target.files?.length ?? 0) > 0) {
-    if (oakId) target.setAttribute('data-oak-id', oakId);
-    return { names: Array.from(target.files ?? []).map((f) => f.name), input: target };
-  }
+  const evidenced = await waitForUploadEvidence(doc, fileName, oakId, 4000);
+  // #region agent log
+  oakDebugLog(
+    'upload.ts:evidence',
+    'post-wait upload evidence',
+    {
+      oakId,
+      fileName,
+      evidenced,
+      pageHasName: pageMentionsFilename(doc, fileName),
+      connectedCount: listFileInputs(doc).length,
+    },
+    'A',
+  );
+  // #endregion
 
-  if (names.length && pageMentionsFilename(doc, names[0])) {
-    return { names, input: target };
+  if (evidenced) {
+    rememberUploadedFile(oakId, fileName);
+    const resolved = oakId ? resolveElementByNodeId(Number(oakId)) : null;
+    const input =
+      resolved instanceof HTMLInputElement
+        ? resolved
+        : listFileInputs(doc).find((n) =>
+            Array.from(n.files ?? []).some((f) => f.name === fileName),
+          ) || target;
+    return { names: [fileName], input };
   }
 
   throw new Error('Upload did not persist after the page remounted the file input');
@@ -175,10 +237,11 @@ export async function uploadFileToElement(
       names,
       elConnected: input.isConnected,
       resolveAfterUpload: Boolean(stillThere),
-      resolveOakId: stillThere?.getAttribute('data-oak-id') ?? null,
       fileInputCount: fileInputs.length,
       fileInputs: fileInputs.slice(0, 6),
-      pageHasName: names[0] ? pageMentionsFilename(el.ownerDocument || document, names[0]) : false,
+      pageHasName: names[0]
+        ? pageMentionsFilename(el.ownerDocument || document, names[0])
+        : false,
     },
     'A',
   );
@@ -187,5 +250,6 @@ export async function uploadFileToElement(
   if (!names.length) {
     throw new Error('File was not attached to input');
   }
+  rememberUploadedFile(oakId, names[0]);
   return names.join(', ');
 }
