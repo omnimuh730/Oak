@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ActionStep } from './automation-types';
 import type { ClientInfo, DomNode, DomTreeMessage, HighlightPayload } from './types';
+import { requestAiAnalyze } from './ai-client';
 import {
   formatMetaTreePreview,
   formatPureTreePreview,
@@ -27,6 +28,7 @@ export default function App() {
   const [contentModal, setContentModal] = useState<{ title: string; content: string } | null>(null);
   const [actionModalNode, setActionModalNode] = useState<DomNode | null>(null);
   const [actionRunning, setActionRunning] = useState(false);
+  const [aiAnalyzeRunning, setAiAnalyzeRunning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
@@ -186,6 +188,40 @@ export default function App() {
     });
   };
 
+  const handleAiAnalyze = async () => {
+    if (!latestTree || !splitTrees || aiAnalyzeRunning) return;
+
+    setAiAnalyzeRunning(true);
+    try {
+      const pureTree = formatPureTreePreview(splitTrees.pure);
+      const metaTree = formatMetaTreePreview(splitTrees.meta, splitTrees.pure);
+      const result = await requestAiAnalyze({
+        pureTree,
+        metaTree,
+        page: {
+          title: latestTree.title || 'Untitled',
+          url: latestTree.url,
+          fetchedAt: latestTree.fetchedAt,
+        },
+      });
+
+      setContentModal({
+        title: 'AI Analyze',
+        content: JSON.stringify(result.plan, null, 2),
+      });
+      showToast('AI analyze complete');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setContentModal({
+        title: 'AI Analyze Error',
+        content: message,
+      });
+      showToast('AI analyze failed');
+    } finally {
+      setAiAnalyzeRunning(false);
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -245,6 +281,14 @@ export default function App() {
             <div className="tree-actions">
               <button type="button" onClick={openPureTreeModal}>Pure Tree</button>
               <button type="button" onClick={openMetaTreeModal}>Meta Tree</button>
+              <button
+                type="button"
+                className="primary"
+                disabled={!splitTrees || aiAnalyzeRunning}
+                onClick={handleAiAnalyze}
+              >
+                {aiAnalyzeRunning ? 'Analyzing...' : 'AI Analyze'}
+              </button>
             </div>
           </>
         )}

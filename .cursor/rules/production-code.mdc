@@ -9,11 +9,11 @@ Write production-ready code only. Do **not** add tests, test files, test scripts
 
 ## Architecture (monorepo)
 
-Packages: `backend/`, `ui-board/`, `extension/`, `shared/`.
+Packages: `backend/`, `ai-backend/`, `ui-board/`, `extension/`, `shared/`.
 
-- Keep package boundaries clear: relay I/O in `backend`, visualization/UX in `ui-board`, page DOM/runtime in `extension`.
+- Keep package boundaries clear: relay I/O in `backend`, AI/prompt/schema in `ai-backend`, visualization/UX in `ui-board`, page DOM/runtime in `extension`.
 - Put cross-package contracts in `shared/` (types, event names, default ports/URLs, shared constants). Do not redefine the same `DomNode` / payload types in multiple packages.
-- Prefer small modules with one job over growing god-files (e.g. `App.tsx`). Extract helpers, formatters, and protocol clients into named modules.
+- Prefer small modules with one job over growing god-files (e.g. `App.tsx`). Extract helpers, prompts, schemas, formatters, and protocol clients into named modules.
 
 ## No hardcoding
 
@@ -21,10 +21,12 @@ Never scatter magic values. Configure once, import everywhere.
 
 | Kind | Do | Don't |
 |------|----|--------|
-| Ports / base URLs | Env (`PORT`, `VITE_*`) + shared defaults | Duplicate `http://localhost:3847` in each app |
-| Secrets | `process.env` only | Inline keys, tokens, credentials |
+| Ports / base URLs | Env (`PORT`, `AI_PORT`, `VITE_*`) + shared defaults | Duplicate `http://localhost:3847` / `3848` in each app |
+| Secrets | `process.env` only (`OPENAI_API_KEY`, etc.) | Inline keys, tokens, credentials |
+| Model / profile paths | Env with a single named default (`OPENAI_MODEL`, `PROFILE_FILE_PATH`) | Repeat model ids / file names across packages |
 | Socket / message names | Shared constant maps (like extension `MSG`) | String literals copied across files |
 | Limits / timeouts | Named constants near the module that owns them | Inline timeouts/size caps copied ad hoc |
+| Domain data | Load from files/config (`profile.md`) | Embed long candidate data in code |
 
 ```ts
 // ❌ BAD — duplicated literals
