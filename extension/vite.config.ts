@@ -19,6 +19,8 @@ export default defineConfig({
     fs: { allow: [rootDir, path.resolve(rootDir, '..')] },
   },
   build: {
+    // Chrome extension pages reject Vite modulepreload (cross-world mismatch warnings).
+    modulePreload: false,
     rollupOptions: {
       input: {
         sidebar: 'sidebar.html',
