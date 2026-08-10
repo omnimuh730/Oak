@@ -30,7 +30,6 @@ export const MSG = {
   GET_CONTENT: 'oak:get-content',
   EXECUTE_ACTIONS: 'oak:execute-actions',
   PLAN_STEP: 'oak:plan-step',
-  DEBUG_LOG: 'oak:debug-log',
   MATCH_OPTION: 'oak:match-option',
   SIDEBAR_OPEN: 'oak:sidebar-open',
   SIDEBAR_CLOSE: 'oak:sidebar-close',

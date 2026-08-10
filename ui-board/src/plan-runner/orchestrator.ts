@@ -112,10 +112,6 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
   }));
   hooks.onSteps([...steps]);
 
-  // #region agent log
-  fetch('http://127.0.0.1:7567/ingest/aca92173-28e8-4fd1-a862-c844087a3138',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'69bbda'},body:JSON.stringify({sessionId:'69bbda',location:'orchestrator.ts:planStart',message:'plan actions summary',data:{actions:(plan.actions??[]).map((a,i)=>({i,action:a.action,element_index:a.element_index,expected_role:a.expected_role,expected_label:(a.expected_label||'').slice(0,80),value:a.value,reason:(a.reason||'').slice(0,80)}))},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-
   let aborted = false;
 
   const publish = () => hooks.onSteps([...steps]);
@@ -197,9 +193,6 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
               ms: null,
             },
           });
-          // #region agent log
-          fetch('http://127.0.0.1:7567/ingest/aca92173-28e8-4fd1-a862-c844087a3138',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'69bbda'},body:JSON.stringify({sessionId:'69bbda',location:'orchestrator.ts:pauseAutofill',message:'pause continue autofill',data:{index:i,element_index:action.element_index,value:action.value,ok:result.ok,error:result.error??null,valueAfter:result.details?.valueAfter??null},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-          // #endregion
           if (result.ok) {
             steps[i].status = 'ok';
             steps[i].message = result.details?.valueAfter
@@ -274,12 +267,6 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
           frameId,
           step: toStepPayload(action, runtimeFile),
         });
-
-        // #region agent log
-        if (action.action === 'upload' || action.action === 'validate' || action.action === 'select_radio' || action.action === 'fill') {
-          fetch('http://127.0.0.1:7567/ingest/aca92173-28e8-4fd1-a862-c844087a3138',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'69bbda'},body:JSON.stringify({sessionId:'69bbda',location:'orchestrator.ts:stepResult',message:'step result',data:{index:i,action:action.action,element_index:action.element_index,element_indexes:action.element_indexes,ok:result.ok,error:result.error??null,valueAfter:result.details?.valueAfter??null},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-        }
-        // #endregion
 
         if (result.ok) {
           steps[i].status = 'ok';

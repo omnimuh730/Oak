@@ -1,6 +1,5 @@
-import { oakDebugLog } from '../../debug-log';
-import { readControlValue } from './read-control-value';
 import { askAiMatchOption } from './match-option-client';
+import { readControlValue } from './read-control-value';
 import {
   OPTION_SIMILARITY_THRESHOLD,
   bestSimilarityMatch,
@@ -258,25 +257,6 @@ async function matchFromCandidates(
     typedQuery,
   });
 
-  // #region agent log
-  oakDebugLog(
-    'select-combobox.ts:aiMatch',
-    'AI option match result',
-    {
-      value,
-      typedQuery,
-      fieldLabel,
-      optionCount: labels.length,
-      optionPreview: labels.slice(0, 8),
-      matched: ai.matched_option ?? null,
-      confidence: ai.confidence ?? null,
-      reason: ai.reason ?? null,
-      error: ai.error ?? null,
-    },
-    'E',
-  );
-  // #endregion
-
   if (ai.matched_option) {
     const el = resolveOptionElement(options, ai.matched_option);
     if (el) {
@@ -298,7 +278,6 @@ async function matchFromCandidates(
 export async function selectComboboxOption(el: Element, value: string): Promise<string> {
   const html = el as HTMLElement;
   const doc = el.ownerDocument || document;
-  const oakId = html.getAttribute('data-oak-id');
   const fieldLabel =
     html.getAttribute('aria-label') ||
     (html.id
@@ -318,30 +297,7 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
     options = await waitForScopedOptions(html, doc);
   }
 
-  let openStrategy = 'initialFocus';
-  let { match, score, strategy } = await matchFromCandidates(
-    options,
-    value,
-    fieldLabel,
-    null,
-  );
-
-  // #region agent log
-  oakDebugLog(
-    'select-combobox.ts:initial',
-    'initial candidates after focus',
-    {
-      oakId,
-      value,
-      optionCount: options.length,
-      optionPreview: options.slice(0, 8).map(optionText),
-      match: match ? optionText(match) : null,
-      matchStrategy: strategy,
-      matchScore: score,
-    },
-    'B',
-  );
-  // #endregion
+  let { match, score } = await matchFromCandidates(options, value, fieldLabel, null);
 
   // Word-by-word typing only when initial candidates (local+AI) did not resolve.
   if (!match && isTypeableCombobox(html) && value.trim().length >= 2) {
@@ -357,47 +313,9 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
       const resolved = await matchFromCandidates(options, value, fieldLabel, typed);
       match = resolved.match;
       score = resolved.score;
-      strategy = resolved.strategy;
-      openStrategy = `wordType:${typed}`;
-
-      // #region agent log
-      oakDebugLog(
-        'select-combobox.ts:wordType',
-        'candidates after typing one more word',
-        {
-          oakId,
-          value,
-          typed,
-          optionCount: options.length,
-          optionPreview: options.slice(0, 8).map(optionText),
-          match: match ? optionText(match) : null,
-          matchStrategy: strategy,
-          matchScore: score,
-        },
-        'B',
-      );
-      // #endregion
-
       if (match) break;
     }
   }
-
-  // #region agent log
-  oakDebugLog(
-    'select-combobox.ts:options',
-    'combobox final candidate set',
-    {
-      oakId,
-      value,
-      openStrategy,
-      optionCount: options.length,
-      optionPreview: options.slice(0, 8).map(optionText),
-      matchStrategy: strategy,
-      matchScore: score,
-    },
-    'B',
-  );
-  // #endregion
 
   if (!match) {
     const bestPct =
@@ -417,28 +335,10 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
   await waitMs(80);
   dismissOpenOverlays(doc, html);
 
-  const valueAfter =
+  return (
     readControlValue(html) ||
     (html instanceof HTMLInputElement && html.value) ||
     html.getAttribute('data-value') ||
-    optionText(match);
-
-  // #region agent log
-  oakDebugLog(
-    'select-combobox.ts:selected',
-    'combobox option clicked',
-    {
-      oakId,
-      value,
-      matched: optionText(match),
-      matchStrategy: strategy,
-      matchScore: score,
-      openStrategy,
-      valueAfter,
-    },
-    'C',
+    optionText(match)
   );
-  // #endregion
-
-  return valueAfter;
 }

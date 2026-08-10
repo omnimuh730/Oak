@@ -1,4 +1,3 @@
-import { oakDebugLog } from '../../debug-log';
 import { resolveElementByNodeId } from '../element-resolver';
 import { verifyElementByPlan } from '../verify-element';
 import { readControlValue } from './read-control-value';
@@ -32,36 +31,7 @@ export function validateElementIndexes(indexes: number[]): {
 } {
   const results: ValidateItemResult[] = [];
   for (const nodeId of indexes) {
-    const raw = resolveElementByNodeId(nodeId);
     const verified = verifyElementByPlan(nodeId, null, null);
-
-    // #region agent log
-    const valuePreview = verified.element ? readControlValue(verified.element).slice(0, 80) : '';
-    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]')).map((node) => ({
-      oakId: node.getAttribute('data-oak-id'),
-      files: Array.from((node as HTMLInputElement).files ?? []).map((f) => f.name),
-    }));
-    oakDebugLog(
-      'validate.ts:item',
-      'validate item probe',
-      {
-        nodeId,
-        resolved: Boolean(raw),
-        resolvedTag: raw?.tagName ?? null,
-        verifyOk: verified.ok,
-        verifyError: verified.error ?? null,
-        role: verified.matchedRole ?? null,
-        valuePreview,
-        rememberedUpload: getRememberedUpload(nodeId),
-        pageHasRemembered: getRememberedUpload(nodeId)
-          ? pageMentionsFilename(document, getRememberedUpload(nodeId) as string)
-          : false,
-        fileInputCount: fileInputs.length,
-        fileInputs: fileInputs.slice(0, 6),
-      },
-      'D',
-    );
-    // #endregion
 
     if (!verified.ok) {
       const asUpload = validateMissingAsUpload(nodeId);

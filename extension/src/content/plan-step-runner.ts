@@ -1,4 +1,3 @@
-import { oakDebugLog } from '../debug-log';
 import type { PlanStepPayload, PlanStepResult } from '../types';
 import { fillElement } from './agents/fill';
 import { readControlValue } from './agents/read-control-value';
@@ -81,27 +80,6 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
 
   try {
     let valueAfter: string | undefined;
-
-    // #region agent log
-    if (step.action === 'fill' || step.action === 'select_radio') {
-      const el = verified.element;
-      oakDebugLog(
-        'plan-step-runner.ts:beforeAct',
-        'about to act on element',
-        {
-          action: step.action,
-          element_index: step.element_index,
-          value: step.value,
-          tag: el.tagName,
-          role: el.getAttribute('role'),
-          ariaHaspopup: el.getAttribute('aria-haspopup'),
-          matchedRole: verified.matchedRole ?? null,
-          matchedLabel: verified.matchedLabel ?? null,
-        },
-        'A',
-      );
-    }
-    // #endregion
 
     switch (step.action) {
       case 'fill': {

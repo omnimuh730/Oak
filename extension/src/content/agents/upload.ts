@@ -1,4 +1,3 @@
-import { oakDebugLog } from '../../debug-log';
 import type { RuntimeAttachedFile } from '../../types';
 import { resolveElementByNodeId } from '../element-resolver';
 import { pageMentionsFilename, rememberUploadedFile } from './upload-registry';
@@ -125,38 +124,11 @@ async function persistUploadAcrossRemount(
     }
 
     if (pageMentionsFilename(doc, fileName)) {
-      // #region agent log
-      oakDebugLog(
-        'upload.ts:remount',
-        'upload accepted via page filename',
-        { attempt, oakId, fileName, targetConnected: target.isConnected },
-        'A',
-      );
-      // #endregion
       rememberUploadedFile(oakId, fileName);
       return { names: [fileName], input: target };
     }
 
     const successor = findSuccessorInput(original, target, oakId, doc);
-
-    // #region agent log
-    oakDebugLog(
-      'upload.ts:remount',
-      'file input remount loop',
-      {
-        attempt,
-        oakId,
-        targetConnected: target.isConnected,
-        targetFiles: target.files?.length ?? 0,
-        successorOakId: successor?.getAttribute('data-oak-id') ?? null,
-        successorFiles: successor ? successor.files?.length ?? 0 : null,
-        connectedCount: listFileInputs(doc).length,
-        connectedOakIds: listFileInputs(doc).map((n) => n.getAttribute('data-oak-id')),
-        pageHasName: pageMentionsFilename(doc, fileName),
-      },
-      'A',
-    );
-    // #endregion
 
     if (successor && (successor.files?.length ?? 0) > 0) {
       if (oakId) successor.setAttribute('data-oak-id', oakId);
@@ -180,20 +152,6 @@ async function persistUploadAcrossRemount(
   }
 
   const evidenced = await waitForUploadEvidence(doc, fileName, oakId, 4000);
-  // #region agent log
-  oakDebugLog(
-    'upload.ts:evidence',
-    'post-wait upload evidence',
-    {
-      oakId,
-      fileName,
-      evidenced,
-      pageHasName: pageMentionsFilename(doc, fileName),
-      connectedCount: listFileInputs(doc).length,
-    },
-    'A',
-  );
-  // #endregion
 
   if (evidenced) {
     rememberUploadedFile(oakId, fileName);
@@ -220,32 +178,7 @@ export async function uploadFileToElement(
 
   const oakId = el.getAttribute('data-oak-id');
   const fileObj = buildFile(file);
-  const { names, input } = await persistUploadAcrossRemount(el, fileObj, oakId);
-
-  // #region agent log
-  const stillThere = oakId ? resolveElementByNodeId(Number(oakId)) : input.isConnected ? input : null;
-  const fileInputs = listFileInputs(el.ownerDocument || document).map((node) => ({
-    oakId: node.getAttribute('data-oak-id'),
-    files: Array.from(node.files ?? []).map((f) => f.name),
-    connected: node.isConnected,
-  }));
-  oakDebugLog(
-    'upload.ts:after',
-    'upload completed DOM snapshot',
-    {
-      oakId,
-      names,
-      elConnected: input.isConnected,
-      resolveAfterUpload: Boolean(stillThere),
-      fileInputCount: fileInputs.length,
-      fileInputs: fileInputs.slice(0, 6),
-      pageHasName: names[0]
-        ? pageMentionsFilename(el.ownerDocument || document, names[0])
-        : false,
-    },
-    'A',
-  );
-  // #endregion
+  const { names } = await persistUploadAcrossRemount(el, fileObj, oakId);
 
   if (!names.length) {
     throw new Error('File was not attached to input');
