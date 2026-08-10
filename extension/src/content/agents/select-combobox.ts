@@ -1,5 +1,10 @@
 import { oakDebugLog } from '../../debug-log';
 import { readControlValue } from './read-control-value';
+import {
+  OPTION_SIMILARITY_THRESHOLD,
+  bestSimilarityMatch,
+  stringSimilarity,
+} from './string-similarity';
 import { waitMs } from './wait';
 
 function normalize(text: string): string {
@@ -130,45 +135,29 @@ async function waitForScopedOptions(
   return [];
 }
 
-const MATCH_STOPWORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'for',
-  'i',
-  'in',
-  'is',
-  'not',
-  'of',
-  'or',
-  'the',
-  'to',
-  'wish',
-]);
-
-function significantTokens(text: string): string[] {
-  return normalize(text)
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 2 && !MATCH_STOPWORDS.has(token));
-}
-
 /**
- * Prefer exact / token matches. Never treat short values like "No" as a substring
- * of unrelated option text (e.g. "Lebanon +961"). Allow multi-word near-matches
- * ("Decline to answer" ↔ "Decline To Self Identify") via significant-token overlap.
+ * Prefer exact / token / prefix matches, then highest string similarity ≥ threshold.
+ * Uses Levenshtein matrix + bigram Dice (see string-similarity.ts). Rejects weak
+ * token overlaps that previously mis-selected e.g. "identify" on Veteran Status.
  */
-function findMatchingOption(options: HTMLElement[], value: string): HTMLElement | null {
+function findMatchingOption(
+  options: HTMLElement[],
+  value: string,
+): { match: HTMLElement | null; score: number | null; strategy: string } {
   const target = normalize(value);
-  if (!target) return null;
+  if (!target) return { match: null, score: null, strategy: 'empty' };
 
   const exact = options.find((opt) => normalize(optionText(opt)) === target);
-  if (exact) return exact;
+  if (exact) return { match: exact, score: 1, strategy: 'exact' };
 
-  const tokenExact = options.find((opt) => {
-    const tokens = normalize(optionText(opt)).split(/[^a-z0-9]+/).filter(Boolean);
-    return tokens.includes(target);
-  });
-  if (tokenExact) return tokenExact;
+  // Whole-value token match only for short values (Yes/No) — avoids "No" ⊂ "Lebanon".
+  if (target.length <= 3) {
+    const tokenExact = options.find((opt) => {
+      const tokens = normalize(optionText(opt)).split(/[^a-z0-9]+/).filter(Boolean);
+      return tokens.includes(target);
+    });
+    if (tokenExact) return { match: tokenExact, score: 1, strategy: 'tokenExact' };
+  }
 
   // Longer targets may match a prefix of option text ("United States" → "United States +1").
   if (target.length >= 4) {
@@ -176,24 +165,39 @@ function findMatchingOption(options: HTMLElement[], value: string): HTMLElement 
       const text = normalize(optionText(opt));
       return text.startsWith(target) || text.includes(`${target} `) || text.includes(`${target}+`);
     });
-    if (prefix) return prefix;
+    if (prefix) {
+      return {
+        match: prefix,
+        score: stringSimilarity(value, optionText(prefix)),
+        strategy: 'prefix',
+      };
+    }
   }
 
-  const targetSig = significantTokens(target);
-  if (targetSig.length === 0) return null;
+  const scored = bestSimilarityMatch(
+    value,
+    options,
+    optionText,
+    OPTION_SIMILARITY_THRESHOLD,
+  );
+  if (scored) {
+    return { match: scored.item, score: scored.score, strategy: 'similarity' };
+  }
 
-  let best: { opt: HTMLElement; score: number } | null = null;
+  // Log best below-threshold candidate for debugging.
+  let bestBelow: { text: string; score: number } | null = null;
   for (const opt of options) {
-    const optSig = significantTokens(optionText(opt));
-    if (!optSig.length) continue;
-    const shared = targetSig.filter((token) => optSig.includes(token));
-    if (!shared.length) continue;
-    const score = shared.length / Math.min(targetSig.length, optSig.length);
-    const distinctive = shared.some((token) => token.length >= 5);
-    if (score < 0.5 && !distinctive) continue;
-    if (!best || score > best.score) best = { opt, score };
+    const score = stringSimilarity(value, optionText(opt));
+    if (!bestBelow || score > bestBelow.score) {
+      bestBelow = { text: optionText(opt), score };
+    }
   }
-  return best?.opt ?? null;
+
+  return {
+    match: null,
+    score: bestBelow?.score ?? null,
+    strategy: bestBelow ? `belowThreshold:${bestBelow.text}` : 'none',
+  };
 }
 
 async function typeFilterValue(el: HTMLElement, value: string): Promise<void> {
@@ -272,10 +276,11 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
     throw new Error('No listbox options appeared after opening combobox');
   }
 
-  const match = findMatchingOption(options, value);
+  const { match, score, strategy } = findMatchingOption(options, value);
   if (!match) {
+    const bestPct = score != null ? ` (best ${(score * 100).toFixed(1)}% < ${OPTION_SIMILARITY_THRESHOLD * 100}%)` : '';
     throw new Error(
-      `No combobox option matching "${value}" (saw: ${options
+      `No combobox option matching "${value}"${bestPct} (saw: ${options
         .slice(0, 6)
         .map(optionText)
         .join(' | ')})`,
@@ -301,6 +306,8 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
       oakId,
       value,
       matched: optionText(match),
+      matchStrategy: strategy,
+      matchScore: score,
       valueAfter,
       inputValue: html instanceof HTMLInputElement ? html.value : null,
     },

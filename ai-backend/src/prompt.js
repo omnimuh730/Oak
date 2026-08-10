@@ -19,8 +19,8 @@ Rules:
 10. Explicitly mark the submit button as forbidden.
 11. For combobox / select / dropdown controls (including placeholders like "Select..."):
     - Prefer action "fill" or "select_radio".
-    - Set value to the exact option label for THAT control when the Pure/Meta tree lists options (copy spelling/casing from the tree, e.g. "Decline To Self Identify" not a paraphrase like "Decline to answer").
-    - Never reuse an option from a different dropdown.
+    - Set value to the exact option label for THAT control when the Pure/Meta tree lists options (copy spelling/casing from the tree for that field only).
+    - Never reuse an option label from a different question (e.g. Gender's "Decline To Self Identify" is wrong for Disability/Veteran — use that field's own decline/opt-out wording).
     - Only use pause_for_review when you cannot determine any answer and a placeholder is insufficient.
 12. Reserve pause_for_review for true blockers. Do not pause just because a question is optional.
 13. Put every answered field index into validation.required_element_indexes so the run validates completeness (not only starred/required fields).
