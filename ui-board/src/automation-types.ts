@@ -23,26 +23,8 @@ export interface ExecuteActionsPayload extends NodeTargetPayload {
   steps: ActionStep[];
 }
 
-export interface AttachedFile {
-  key: string;
-  name: string;
-  mimeType: string;
-  base64: string;
-}
-
-export interface EvalScriptPayload {
-  tabId: number;
-  url: string;
-  code: string;
-  frameId?: number;
-  oakNodeId?: number;
-  extensionId?: string;
-  files?: AttachedFile[];
-}
-
 export interface DomCommandResult {
   ok?: boolean;
   content?: string;
-  result?: string;
   error?: string;
 }

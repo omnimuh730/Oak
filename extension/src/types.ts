@@ -1,5 +1,5 @@
 export interface DomNode {
-  nodeId: number; // Changed from path
+  nodeId: number;
   tag: string;
   id?: string;
   classes?: string[];
@@ -28,14 +28,13 @@ export const MSG = {
   CLEAR_HIGHLIGHT: 'oak:clear-highlight',
   GET_CONTENT: 'oak:get-content',
   EXECUTE_ACTIONS: 'oak:execute-actions',
-  EVAL_SCRIPT: 'oak:eval-script',
   SIDEBAR_OPEN: 'oak:sidebar-open',
   SIDEBAR_CLOSE: 'oak:sidebar-close',
   SOCKET_STATUS: 'oak:socket-status',
 } as const;
 
 export interface HighlightPayload {
-  nodeId: number; // Changed from path
+  nodeId: number;
   tabId: number;
   url: string;
 }
@@ -57,21 +56,4 @@ export interface ExecuteActionsPayload {
   nodeId: number;
   tabId: number;
   steps: ActionStep[];
-}
-
-export interface AttachedFile {
-  key: string;
-  name: string;
-  mimeType: string;
-  base64: string;
-}
-
-export interface EvalScriptPayload {
-  tabId: number;
-  url: string;
-  code: string;
-  frameId?: number;
-  oakNodeId?: number;
-  extensionId?: string;
-  files?: AttachedFile[];
 }

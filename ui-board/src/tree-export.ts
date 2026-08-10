@@ -106,21 +106,6 @@ export function formatPureTreePreview(pure: PureNode, depth = 0): string {
   return lines.join('\n');
 }
 
-/** Indented pure tree text for AI analysis (not JSON). */
-export function formatPureTreeForAnalyze(
-  pure: PureNode,
-  ctx: { title: string; url: string; fetchedAt: string },
-): string {
-  return [
-    `# DOM Tree — ${ctx.title || 'Untitled'}`,
-    `URL: ${ctx.url}`,
-    `Fetched: ${ctx.fetchedAt}`,
-    '',
-    formatPureTreePreview(pure),
-    '',
-  ].join('\n');
-}
-
 function buildPureIndex(pure: PureNode, map = new Map<number, PureNode>()): Map<number, PureNode> {
   map.set(pure.id, pure);
   for (const child of pure.children) buildPureIndex(child, map);
