@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { sendPlanStepToTab } from './tab-messaging';
 import {
   DEFAULT_SERVER,
   MSG,
@@ -6,6 +7,7 @@ import {
   type ExecuteActionsPayload,
   type GetContentPayload,
   type HighlightPayload,
+  type PlanStepSocketPayload,
 } from './types';
 
 let socket: Socket | null = null;
@@ -85,6 +87,23 @@ function connectSocket(serverUrl: string) {
       },
     );
   });
+
+  socket.on('dom:plan-step', (payload: PlanStepSocketPayload, ack?: (res: unknown) => void) => {
+    const { tabId, step, frameId } = payload ?? {};
+    if (!tabId || !step?.action) {
+      ack?.({ ok: false, error: 'Missing tabId or step' });
+      return;
+    }
+
+    void sendPlanStepToTab(tabId, step, frameId)
+      .then((res) => ack?.(res))
+      .catch((err) =>
+        ack?.({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+  });
 }
 
 chrome.storage.local.get(['serverUrl'], (result) => {
@@ -109,6 +128,20 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === MSG.SOCKET_STATUS) {
     sendResponse({ connected: socketConnected });
+    return true;
+  }
+
+  if (message.type === MSG.DEBUG_LOG) {
+    const payload = message.payload ?? {};
+    fetch('http://127.0.0.1:7567/ingest/aca92173-28e8-4fd1-a862-c844087a3138', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '69bbda',
+      },
+      body: JSON.stringify({ sessionId: '69bbda', ...payload }),
+    }).catch(() => {});
+    sendResponse({ ok: true });
     return true;
   }
 

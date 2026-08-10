@@ -79,6 +79,10 @@ io.on('connection', (socket) => {
     relayToExtension(payload, 'dom:execute-actions', ack, 60000);
   });
 
+  socket.on('dom:plan-step', (payload, ack) => {
+    relayPlanStepToExtension(payload, ack, 90000);
+  });
+
   socket.on('disconnect', () => {
     clients.delete(socket.id);
     console.log(`[${type}] disconnected: ${name} (${socket.id})`);
@@ -115,6 +119,38 @@ function relayToExtension(payload, event, ack, timeoutMs = 15000) {
       return;
     }
     ack?.(res ?? { error: 'No response from extension' });
+  });
+}
+
+function relayPlanStepToExtension(payload, ack, timeoutMs = 45000) {
+  const { extensionId, tabId, step, frameId } = payload ?? {};
+  if (!tabId || !step?.action) {
+    ack?.({ ok: false, error: 'Missing tabId or step' });
+    return;
+  }
+
+  const targetId = extensionId ?? findExtensionSocketId();
+  if (!targetId) {
+    ack?.({ ok: false, error: 'No extension connected' });
+    return;
+  }
+
+  const extSocket = io.sockets.sockets.get(targetId);
+  if (!extSocket) {
+    ack?.({ ok: false, error: 'Extension socket not found' });
+    return;
+  }
+
+  console.log(
+    `[dom:plan-step] ${step.action} index=${step.element_index ?? '-'} tab=${tabId} frame=${frameId ?? 'auto'}`,
+  );
+
+  extSocket.timeout(timeoutMs).emit('dom:plan-step', payload, (err, res) => {
+    if (err) {
+      ack?.({ ok: false, error: err.message ?? 'Extension request timed out' });
+      return;
+    }
+    ack?.(res ?? { ok: false, error: 'No response from extension' });
   });
 }
 

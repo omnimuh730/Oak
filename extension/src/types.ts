@@ -28,10 +28,59 @@ export const MSG = {
   CLEAR_HIGHLIGHT: 'oak:clear-highlight',
   GET_CONTENT: 'oak:get-content',
   EXECUTE_ACTIONS: 'oak:execute-actions',
+  PLAN_STEP: 'oak:plan-step',
+  DEBUG_LOG: 'oak:debug-log',
   SIDEBAR_OPEN: 'oak:sidebar-open',
   SIDEBAR_CLOSE: 'oak:sidebar-close',
   SOCKET_STATUS: 'oak:socket-status',
 } as const;
+
+export type PlanStepActionType =
+  | 'fill'
+  | 'upload'
+  | 'select_radio'
+  | 'wait'
+  | 'validate'
+  | 'verify_only';
+
+export interface RuntimeAttachedFile {
+  key: string;
+  name: string;
+  mimeType: string;
+  base64: string;
+}
+
+export interface PlanStepPayload {
+  action: PlanStepActionType;
+  element_index: number | null;
+  element_indexes: number[] | null;
+  expected_label: string | null;
+  expected_role: string | null;
+  value: string | null;
+  file?: RuntimeAttachedFile | null;
+  ms: number | null;
+}
+
+export interface PlanStepSocketPayload {
+  tabId: number;
+  url: string;
+  extensionId?: string;
+  frameId?: number | null;
+  step: PlanStepPayload;
+}
+
+export interface PlanStepResult {
+  ok: boolean;
+  verified?: boolean;
+  acted?: boolean;
+  error?: string;
+  details?: {
+    nodeId?: number;
+    matchedLabel?: string;
+    matchedRole?: string;
+    valueAfter?: string;
+  };
+}
 
 export interface HighlightPayload {
   nodeId: number;

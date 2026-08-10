@@ -71,6 +71,7 @@ npm run dev:ai-backend
 | `OPENAI_API_KEY` | _(required)_ | OpenAI API key |
 | `OPENAI_MODEL` | `gpt-4.1` | Model used for AI Analyze |
 | `OPENAI_REASONING_EFFORT` | _(unset)_ | `none` / `minimal` / `low` / `medium` / `high` / `xhigh`. When set, sent as `reasoning.effort` and temperature is omitted |
+| `FILE_PATH` | _(unset)_ | Resume/CV (or other) file uploaded during plan Run |
 | `AI_PORT` | `3848` | AI backend port |
 | `PROFILE_FILE_PATH` | `profile.md` | Applicant profile source for the planner prompt |
 | `VITE_AI_SERVER_URL` | `http://localhost:3848` | UI board AI backend URL |
@@ -93,6 +94,7 @@ npm run build -w extension
 3. Click **Fetch DOM** in the sidebar
 4. The DOM tree appears on the UI board in real time
 5. Click **AI Analyze** to generate a JSON action plan from Pure Tree + Meta Tree (+ `profile.md`)
+6. Click **Run** to execute the plan step-by-step (verify → act). Uploads use `FILE_PATH`. `pause_for_review` and failures open Continue / Skip / Abort.
 
 You can also click the extension icon in the toolbar to toggle the sidebar.
 

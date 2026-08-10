@@ -25,6 +25,11 @@ export const PROFILE_PATH = resolveFromRepo(
   process.env.PROFILE_FILE_PATH || 'profile.md',
 );
 
+export const RUNTIME_FILE_KEY = process.env.RUNTIME_FILE_KEY || 'runtime_file';
+export const FILE_PATH = process.env.FILE_PATH
+  ? resolveFromRepo(process.env.FILE_PATH.trim())
+  : null;
+
 export function resolveFromRepo(value) {
   return path.isAbsolute(value) ? value : path.join(REPO_ROOT, value);
 }

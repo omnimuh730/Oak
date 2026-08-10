@@ -2,6 +2,10 @@
 
 Edit this file with candidate details used by AI Analyze.
 
+The planner should answer every form question it can. When a detail is absent here,
+the model chooses a sensible answer (or a `{{PLACEHOLDER}}`) — do not leave fields blank
+just because they are optional/voluntary.
+
 Example placeholders the planner may emit when a value is missing:
 
 - {{APPLICANT_FULL_NAME}}
@@ -18,6 +22,7 @@ fullName: "John Doe"
 email: "john.doe@example.com"
 phone: "(123) 456-7283"
 linkedinUrl: "www.linkedin.com"
+githubUrl: "https://github.com/johndoe"
 location: "Alabama, AL"
 workAuthorization: "US Citizen"
 requiresVisaSponsorship: "No"

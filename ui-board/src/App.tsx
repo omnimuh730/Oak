@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ActionStep } from './automation-types';
 import type { ClientInfo, DomNode, DomTreeMessage, HighlightPayload } from './types';
-import { requestAiAnalyze } from './ai-client';
+import { fetchRuntimeFile, requestAiAnalyze } from './ai-client';
 import {
   formatMetaTreePreview,
   formatPureTreePreview,
@@ -12,6 +12,14 @@ import { ActionBuilderModal } from './components/ActionBuilderModal';
 import { ContentModal } from './components/ContentModal';
 import { ContextMenu, type ContextMenuState } from './components/ContextMenu';
 import { DomTreeView } from './components/DomTreeView';
+import { PlanRunModal } from './components/PlanRunModal';
+import { runActionPlan } from './plan-runner/orchestrator';
+import type {
+  ActionPlan,
+  PauseDecision,
+  PauseRequest,
+  RunStepRecord,
+} from './plan-runner/types';
 import './App.css';
 
 const DEFAULT_SERVER = 'http://localhost:3847';
@@ -29,8 +37,14 @@ export default function App() {
   const [actionModalNode, setActionModalNode] = useState<DomNode | null>(null);
   const [actionRunning, setActionRunning] = useState(false);
   const [aiAnalyzeRunning, setAiAnalyzeRunning] = useState(false);
+  const [actionPlan, setActionPlan] = useState<ActionPlan | null>(null);
+  const [planRunOpen, setPlanRunOpen] = useState(false);
+  const [planRunRunning, setPlanRunRunning] = useState(false);
+  const [planRunSteps, setPlanRunSteps] = useState<RunStepRecord[]>([]);
+  const [planPause, setPlanPause] = useState<PauseRequest | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const pauseResolverRef = useRef<((decision: PauseDecision) => void) | null>(null);
 
   useEffect(() => {
     const socket = io(serverUrl, {
@@ -205,11 +219,13 @@ export default function App() {
         },
       });
 
+      const plan = result.plan as ActionPlan;
+      setActionPlan(plan);
       setContentModal({
         title: 'AI Analyze',
-        content: JSON.stringify(result.plan, null, 2),
+        content: JSON.stringify(plan, null, 2),
       });
-      showToast('AI analyze complete');
+      showToast('AI analyze complete — click Run to execute');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setContentModal({
@@ -221,6 +237,76 @@ export default function App() {
       setAiAnalyzeRunning(false);
     }
   };
+
+  const requestPauseDecision = useCallback((request: PauseRequest) => {
+    setPlanPause(request);
+    return new Promise<PauseDecision>((resolve) => {
+      pauseResolverRef.current = resolve;
+    });
+  }, []);
+
+  const handlePauseDecision = (decision: PauseDecision) => {
+    setPlanPause(null);
+    const resolve = pauseResolverRef.current;
+    pauseResolverRef.current = null;
+    resolve?.(decision);
+  };
+
+  const handlePlanRun = async () => {
+    if (!latestTree || !actionPlan || planRunRunning) return;
+
+    const tabId = latestTree.meta?.tabId ?? latestTree.tabId;
+    if (!tabId) {
+      showToast('No active page session');
+      return;
+    }
+
+    const socket = socketRef.current;
+    if (!socket) {
+      showToast('Not connected to backend');
+      return;
+    }
+
+    setPlanRunOpen(true);
+    setPlanRunRunning(true);
+    setPlanRunSteps([]);
+    setPlanPause(null);
+
+    try {
+      const runtimeFile = await fetchRuntimeFile();
+      const report = await runActionPlan({
+        plan: actionPlan,
+        socket,
+        tabId,
+        url: latestTree.url,
+        extensionId: latestTree.meta?.from,
+        frameId: latestTree.meta?.frameId ?? latestTree.frameId ?? null,
+        runtimeFile,
+        hooks: {
+          onSteps: setPlanRunSteps,
+          onPause: requestPauseDecision,
+        },
+      });
+
+      if (report.aborted) showToast('Plan run aborted');
+      else if (report.ok) showToast('Plan run complete');
+      else showToast('Plan run finished with issues');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast(`Plan run failed: ${message}`);
+    } finally {
+      setPlanRunRunning(false);
+      setPlanPause(null);
+      pauseResolverRef.current = null;
+    }
+  };
+
+  const canRunPlan = Boolean(
+    actionPlan &&
+      (latestTree?.meta?.tabId ?? latestTree?.tabId) &&
+      !planRunRunning &&
+      !aiAnalyzeRunning,
+  );
 
   return (
     <div className="app">
@@ -284,10 +370,18 @@ export default function App() {
               <button
                 type="button"
                 className="primary"
-                disabled={!splitTrees || aiAnalyzeRunning}
+                disabled={!splitTrees || aiAnalyzeRunning || planRunRunning}
                 onClick={handleAiAnalyze}
               >
                 {aiAnalyzeRunning ? 'Analyzing...' : 'AI Analyze'}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={!canRunPlan}
+                onClick={handlePlanRun}
+              >
+                {planRunRunning ? 'Running...' : 'Run'}
               </button>
             </div>
           </>
@@ -361,6 +455,20 @@ export default function App() {
           running={actionRunning}
           onClose={() => !actionRunning && setActionModalNode(null)}
           onRun={runActions}
+        />
+      )}
+
+      {planRunOpen && actionPlan && (
+        <PlanRunModal
+          goal={actionPlan.goal}
+          running={planRunRunning}
+          steps={planRunSteps}
+          pause={planPause}
+          onPauseDecision={handlePauseDecision}
+          onClose={() => {
+            if (planRunRunning || planPause) return;
+            setPlanRunOpen(false);
+          }}
         />
       )}
 

@@ -1,11 +1,14 @@
 import cors from 'cors';
 import express from 'express';
+import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import {
   AI_PORT,
+  FILE_PATH,
   OPENAI_MODEL,
   OPENAI_REASONING_EFFORT,
   PROFILE_PATH,
+  RUNTIME_FILE_KEY,
 } from './config.js';
 import { requestActionPlan } from './openai.js';
 import { buildAnalyzePrompt } from './prompt.js';
@@ -23,7 +26,34 @@ app.get('/health', (_req, res) => {
     model: OPENAI_MODEL,
     reasoningEffort: OPENAI_REASONING_EFFORT,
     profilePath: PROFILE_PATH,
+    filePath: FILE_PATH,
   });
+});
+
+app.get('/api/runtime-file', async (_req, res) => {
+  if (!FILE_PATH) {
+    res.status(404).json({
+      error: 'FILE_PATH is not set in .env',
+    });
+    return;
+  }
+
+  try {
+    const buffer = await readFile(FILE_PATH);
+    res.json({
+      file: {
+        key: RUNTIME_FILE_KEY,
+        name: path.basename(FILE_PATH),
+        mimeType: mimeTypeForPath(FILE_PATH),
+        base64: buffer.toString('base64'),
+      },
+    });
+  } catch (err) {
+    res.status(404).json({
+      error: `Runtime file not found at ${FILE_PATH}`,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 app.post('/api/ai-analyze', async (req, res) => {
@@ -70,6 +100,20 @@ async function readApplicantProfile() {
   } catch {
     return EMPTY_PROFILE_NOTE;
   }
+}
+
+function mimeTypeForPath(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const map = {
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.txt': 'text/plain',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+  };
+  return map[ext] || 'application/octet-stream';
 }
 
 app.listen(AI_PORT, () => {
