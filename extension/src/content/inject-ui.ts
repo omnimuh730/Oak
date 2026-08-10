@@ -40,7 +40,7 @@ function mountOakUI(): void {
   fab.type = 'button';
   const iconUrl = chrome.runtime.getURL('public/icon-48.png');
   fab.innerHTML = `
-    <img class="oak-fab-icon" src="${iconUrl}" alt="" width="22" height="22" />
+    <img class="oak-fab-icon" src="${iconUrl}" alt="Oak" width="28" height="28" />
     <span class="oak-fab-status" hidden></span>
   `;
   shadow.appendChild(fab);
@@ -50,7 +50,7 @@ function mountOakUI(): void {
   sidebar.className = 'oak-sidebar';
   sidebar.innerHTML = `
     <div class="oak-sidebar-header">
-      <span class="oak-logo"><img src="${iconUrl}" alt="" width="20" height="20" /> Oak</span>
+      <span class="oak-logo"><img src="${iconUrl}" alt="" width="22" height="22" /> Oak</span>
       <button class="oak-close" title="Close">✕</button>
     </div>
     <iframe class="oak-sidebar-frame" src="${chrome.runtime.getURL('sidebar.html')}" allow="clipboard-read; clipboard-write"></iframe>
@@ -212,7 +212,7 @@ const STYLES = `
   }
 
   .oak-fab.busy .oak-fab-icon {
-    animation: oak-spin 1.2s linear infinite;
+    animation: oak-pulse 1.1s ease-in-out infinite;
   }
 
   .oak-fab.done {
@@ -224,12 +224,13 @@ const STYLES = `
   }
 
   .oak-fab-icon {
-    width: 22px;
-    height: 22px;
-    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
     object-fit: cover;
     flex-shrink: 0;
     display: block;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
   }
 
   .oak-fab-status {
@@ -242,9 +243,9 @@ const STYLES = `
     text-overflow: ellipsis;
   }
 
-  @keyframes oak-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+  @keyframes oak-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.72; transform: scale(0.94); }
   }
 
   .oak-sidebar {
