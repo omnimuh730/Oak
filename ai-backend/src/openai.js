@@ -6,6 +6,7 @@ import {
   OPENAI_TEMPERATURE,
   requireOpenAiApiKey,
 } from './config.js';
+import { summarizeUsage } from './pricing.js';
 import { ACTION_PLAN_FORMAT } from './schema.js';
 
 export async function requestActionPlan(systemPrompt, userPrompt) {
@@ -68,10 +69,12 @@ export async function requestActionPlan(systemPrompt, userPrompt) {
 
   validatePlanShape(plan);
 
+  const model = data.model || OPENAI_MODEL;
   return {
     plan,
-    model: data.model || OPENAI_MODEL,
+    model,
     responseId: data.id || null,
+    usage: summarizeUsage(data.usage, model),
   };
 }
 

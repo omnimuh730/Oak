@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import type { PipelineProgress } from '../../shared/pipeline-types';
 import { runFabPipeline } from './pipeline/run-pipeline';
+import { addPipelineUsage } from './pipeline/usage-tracker';
 import { sendPlanStepToTab } from './tab-messaging';
 import {
   DEFAULT_AI_SERVER,
@@ -219,6 +220,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             error: data.error || `match-option failed: ${res.status}`,
           } satisfies MatchOptionResponse);
           return;
+        }
+        if (pipelineRunningTabId != null && data.usage) {
+          addPipelineUsage(data.usage);
         }
         sendResponse(data);
       } catch (err) {

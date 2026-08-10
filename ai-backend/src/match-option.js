@@ -5,6 +5,7 @@ import {
   OPENAI_TEMPERATURE,
   requireOpenAiApiKey,
 } from './config.js';
+import { summarizeUsage } from './pricing.js';
 
 const MATCH_OPTION_FORMAT = {
   type: 'json_schema',
@@ -112,11 +113,13 @@ export async function requestOptionMatch({
     matched = recovered || null;
   }
 
+  const model = data.model || OPENAI_MODEL;
   return {
     matched_option: matched,
     confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
     reason: typeof parsed.reason === 'string' ? parsed.reason : '',
-    model: data.model || OPENAI_MODEL,
+    model,
+    usage: summarizeUsage(data.usage, model),
   };
 }
 

@@ -1,5 +1,6 @@
-import { DEFAULT_AI_SERVER } from '../types';
+import type { AiUsageSummary } from '../../../shared/ai-usage';
 import type { ActionPlan, RuntimeAttachedFile } from '../../../shared/plan-runner/types';
+import { DEFAULT_AI_SERVER } from '../types';
 
 export interface AiAnalyzePage {
   title?: string;
@@ -19,6 +20,7 @@ export interface AiAnalyzeResponse {
   model?: string;
   responseId?: string | null;
   error?: string;
+  usage?: AiUsageSummary;
 }
 
 function aiBase(aiServerUrl: string = DEFAULT_AI_SERVER): string {

@@ -1,3 +1,4 @@
+import { formatDuration, formatUsd } from '../../../shared/ai-usage';
 import type { PipelineProgress } from '../../../shared/pipeline-types';
 import { MSG } from '../types';
 
@@ -91,11 +92,16 @@ function mountOakUI(): void {
     statusEl.hidden = false;
     iconEl.hidden = false;
     statusEl.textContent = progress.message;
-    fab.title = progress.error
-      ? progress.error
-      : progress.stepLabel
-        ? `${progress.message} — ${progress.stepLabel}`
-        : progress.message;
+
+    const detailParts = [
+      progress.stepLabel ? `Step: ${progress.stepLabel}` : null,
+      progress.durationMs != null ? `Time: ${formatDuration(progress.durationMs)}` : null,
+      progress.usage
+        ? `AI: ${formatUsd(progress.usage.costUsd)} · ${progress.usage.totalTokens || 0} tok`
+        : null,
+      progress.error ? `Error: ${progress.error}` : null,
+    ].filter(Boolean);
+    fab.title = detailParts.length ? detailParts.join('\n') : progress.message;
   }
 
   fab.addEventListener('click', () => {
@@ -223,7 +229,7 @@ const STYLES = `
     font-weight: 600;
     letter-spacing: 0.01em;
     white-space: nowrap;
-    max-width: 220px;
+    max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
   }

@@ -118,6 +118,7 @@ app.post('/api/ai-analyze', async (req, res) => {
       plan: result.plan,
       model: result.model,
       responseId: result.responseId,
+      usage: result.usage,
     });
   } catch (err) {
     res.status(500).json({

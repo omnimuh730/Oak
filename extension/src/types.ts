@@ -51,6 +51,8 @@ export interface MatchOptionResponse {
   confidence?: number;
   reason?: string;
   error?: string;
+  model?: string;
+  usage?: import('../../shared/ai-usage').AiUsageSummary;
 }
 
 export type PlanStepActionType =

@@ -1,14 +1,20 @@
+import { formatDuration, formatUsd } from '../../../shared/ai-usage';
+import { runActionPlan } from '../../../shared/plan-runner/orchestrator';
+import type { ActionPlan, PauseRequest, PlanStepPayload } from '../../../shared/plan-runner/types';
+import type { PipelineProgress } from '../../../shared/pipeline-types';
 import {
   formatMetaTreePreview,
   formatPureTreePreview,
   splitDomTree,
 } from '../../../shared/tree-export';
-import { runActionPlan } from '../../../shared/plan-runner/orchestrator';
-import type { ActionPlan, PauseRequest, PlanStepPayload } from '../../../shared/plan-runner/types';
-import type { PipelineProgress } from '../../../shared/pipeline-types';
 import { sendPlanStepToTab, sendTabMessage } from '../tab-messaging';
 import { DEFAULT_AI_SERVER, MSG, type DomNode, type DomTreePayload } from '../types';
 import { fetchRuntimeFile, requestAiAnalyze } from './ai-client';
+import {
+  addPipelineUsage,
+  beginPipelineUsageTracking,
+  endPipelineUsageTracking,
+} from './usage-tracker';
 
 export type PipelineEmit = (progress: PipelineProgress) => void;
 
@@ -94,120 +100,152 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     onProgress,
   } = args;
 
-  onProgress({ phase: 'fetching', message: 'Fetching DOM…' });
+  const startedAt = Date.now();
+  beginPipelineUsageTracking();
 
-  const treePayload = await fetchDomFromTab(tabId, preferredFrameId);
-  emitDomTree?.(treePayload);
+  const finishMeta = () => {
+    const durationMs = Date.now() - startedAt;
+    const usage = endPipelineUsageTracking();
+    return { durationMs, usage };
+  };
 
-  const nodeCount = countDomNodes(treePayload.tree);
-  onProgress({
-    phase: 'analyzing',
-    message: `Analyzing ${nodeCount} nodes…`,
-  });
+  try {
+    onProgress({ phase: 'fetching', message: 'Fetching DOM…' });
 
-  const split = splitDomTree(treePayload.tree);
-  const pureTree = formatPureTreePreview(split.pure);
-  const metaTree = formatMetaTreePreview(split.meta, split.pure);
+    const treePayload = await fetchDomFromTab(tabId, preferredFrameId);
+    emitDomTree?.(treePayload);
 
-  const analyze = await requestAiAnalyze(
-    {
-      pureTree,
-      metaTree,
-      page: {
-        title: treePayload.title || 'Untitled',
-        url: treePayload.url,
-        fetchedAt: treePayload.fetchedAt,
-      },
-    },
-    aiServerUrl,
-  );
-
-  const plan = analyze.plan as ActionPlan;
-  const stepTotal = plan.actions?.length ?? 0;
-
-  onProgress({
-    phase: 'running',
-    message: stepTotal ? `Running 0/${stepTotal}…` : 'Running…',
-    stepIndex: 0,
-    stepTotal,
-  });
-
-  const runtimeFile = await fetchRuntimeFile(aiServerUrl);
-  const frameId = treePayload.frameId ?? preferredFrameId ?? null;
-
-  const report = await runActionPlan({
-    plan,
-    runtimeFile,
-    executeStep: async (step: PlanStepPayload) => {
-      const res = await sendPlanStepToTab(tabId, step, frameId);
-      const details = res.details ?? {};
-      return {
-        ok: Boolean(res.ok),
-        verified: res.verified,
-        acted: res.acted,
-        error: res.error,
-        details: {
-          nodeId: typeof details.nodeId === 'number' ? details.nodeId : undefined,
-          matchedLabel:
-            typeof details.matchedLabel === 'string' ? details.matchedLabel : undefined,
-          matchedRole:
-            typeof details.matchedRole === 'string' ? details.matchedRole : undefined,
-          valueAfter: typeof details.valueAfter === 'string' ? details.valueAfter : undefined,
-        },
-      };
-    },
-    hooks: {
-      onSteps: (steps) => {
-        const running = steps.find((s) => s.status === 'running' || s.status === 'paused');
-        const doneCount = steps.filter((s) =>
-          ['ok', 'skipped', 'blocked', 'failed', 'aborted'].includes(s.status),
-        ).length;
-        const current = running ?? steps[Math.min(doneCount, steps.length - 1)];
-        const idx = current ? current.index + 1 : doneCount;
-        onProgress({
-          phase: 'running',
-          message: `Running ${Math.min(idx, stepTotal)}/${stepTotal}…`,
-          stepIndex: current?.index,
-          stepTotal,
-          stepLabel: current
-            ? shortLabel(current.expected_label, current.action)
-            : undefined,
-        });
-      },
-      onPause: async (request) => {
-        onProgress({
-          phase: 'running',
-          message:
-            request.kind === 'error'
-              ? `Skipping: ${shortLabel(request.expected_label, request.action)}`
-              : `Review: ${shortLabel(request.expected_label, request.action)}`,
-          stepIndex: request.index,
-          stepTotal,
-          stepLabel: shortLabel(request.expected_label, request.action),
-        });
-        return autoPauseDecision(request);
-      },
-    },
-  });
-
-  if (report.aborted) {
+    const nodeCount = countDomNodes(treePayload.tree);
     onProgress({
-      phase: 'error',
-      message: 'Aborted',
-      error: 'Plan run aborted',
+      phase: 'analyzing',
+      message: `Analyzing ${nodeCount} nodes…`,
+    });
+
+    const split = splitDomTree(treePayload.tree);
+    const pureTree = formatPureTreePreview(split.pure);
+    const metaTree = formatMetaTreePreview(split.meta, split.pure);
+
+    const analyze = await requestAiAnalyze(
+      {
+        pureTree,
+        metaTree,
+        page: {
+          title: treePayload.title || 'Untitled',
+          url: treePayload.url,
+          fetchedAt: treePayload.fetchedAt,
+        },
+      },
+      aiServerUrl,
+    );
+    addPipelineUsage(analyze.usage);
+
+    const plan = analyze.plan as ActionPlan;
+    const stepTotal = plan.actions?.length ?? 0;
+
+    onProgress({
+      phase: 'running',
+      message: stepTotal ? `Running 0/${stepTotal}…` : 'Running…',
+      stepIndex: 0,
       stepTotal,
     });
-    return;
-  }
 
-  const { summary } = report;
-  onProgress({
-    phase: 'done',
-    message: report.ok
-      ? `Done · ${summary.ok} ok`
-      : `Done · ${summary.ok} ok, ${summary.skipped} skipped`,
-    stepTotal,
-  });
+    const runtimeFile = await fetchRuntimeFile(aiServerUrl);
+    const frameId = treePayload.frameId ?? preferredFrameId ?? null;
+
+    const report = await runActionPlan({
+      plan,
+      runtimeFile,
+      executeStep: async (step: PlanStepPayload) => {
+        const res = await sendPlanStepToTab(tabId, step, frameId);
+        const details = res.details ?? {};
+        return {
+          ok: Boolean(res.ok),
+          verified: res.verified,
+          acted: res.acted,
+          error: res.error,
+          details: {
+            nodeId: typeof details.nodeId === 'number' ? details.nodeId : undefined,
+            matchedLabel:
+              typeof details.matchedLabel === 'string' ? details.matchedLabel : undefined,
+            matchedRole:
+              typeof details.matchedRole === 'string' ? details.matchedRole : undefined,
+            valueAfter: typeof details.valueAfter === 'string' ? details.valueAfter : undefined,
+          },
+        };
+      },
+      hooks: {
+        onSteps: (steps) => {
+          const running = steps.find((s) => s.status === 'running' || s.status === 'paused');
+          const doneCount = steps.filter((s) =>
+            ['ok', 'skipped', 'blocked', 'failed', 'aborted'].includes(s.status),
+          ).length;
+          const current = running ?? steps[Math.min(doneCount, steps.length - 1)];
+          const idx = current ? current.index + 1 : doneCount;
+          onProgress({
+            phase: 'running',
+            message: `Running ${Math.min(idx, stepTotal)}/${stepTotal}…`,
+            stepIndex: current?.index,
+            stepTotal,
+            stepLabel: current
+              ? shortLabel(current.expected_label, current.action)
+              : undefined,
+          });
+        },
+        onPause: async (request) => {
+          onProgress({
+            phase: 'running',
+            message:
+              request.kind === 'error'
+                ? `Skipping: ${shortLabel(request.expected_label, request.action)}`
+                : `Review: ${shortLabel(request.expected_label, request.action)}`,
+            stepIndex: request.index,
+            stepTotal,
+            stepLabel: shortLabel(request.expected_label, request.action),
+          });
+          return autoPauseDecision(request);
+        },
+      },
+    });
+
+    const { durationMs, usage } = finishMeta();
+    const timeLabel = formatDuration(durationMs);
+    const costLabel = formatUsd(usage?.costUsd);
+
+    if (report.aborted) {
+      onProgress({
+        phase: 'error',
+        message: `Aborted · ${timeLabel} · ${costLabel}`,
+        error: 'Plan run aborted',
+        stepTotal,
+        durationMs,
+        usage,
+      });
+      return;
+    }
+
+    const { summary } = report;
+    const resultLabel = report.ok
+      ? `${summary.ok} ok`
+      : `${summary.ok} ok, ${summary.skipped} skipped`;
+
+    onProgress({
+      phase: 'done',
+      message: `Done · ${resultLabel} · ${timeLabel} · ${costLabel}`,
+      stepTotal,
+      durationMs,
+      usage,
+    });
+  } catch (err) {
+    const { durationMs, usage } = finishMeta();
+    const error = err instanceof Error ? err.message : String(err);
+    onProgress({
+      phase: 'error',
+      message: `Failed · ${formatDuration(durationMs)} · ${formatUsd(usage?.costUsd)}`,
+      error,
+      durationMs,
+      usage,
+    });
+  }
 }
 
 function countDomNodes(node: DomNode): number {

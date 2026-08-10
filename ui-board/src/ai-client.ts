@@ -20,6 +20,16 @@ export interface AiAnalyzeResponse {
   model?: string;
   responseId?: string | null;
   error?: string;
+  usage?: {
+    model: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    totalTokens: number;
+    costUsd: number | null;
+    priced?: boolean;
+    pricingNote?: string;
+  };
 }
 
 function aiBase(aiServerUrl: string = DEFAULT_AI_SERVER): string {
