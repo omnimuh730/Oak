@@ -1,79 +1,22 @@
 /** Cross-package contracts for AI Analyze plans and deterministic plan-step execution. */
-
-export type PlanActionType =
-  | 'fill'
-  | 'upload'
-  | 'select_radio'
-  | 'wait'
-  | 'validate'
-  | 'pause_for_review'
-  | 'forbidden';
-
-export type PlanStepActionType =
-  | 'fill'
-  | 'upload'
-  | 'select_radio'
-  | 'wait'
-  | 'validate'
-  | 'verify_only';
-
-export interface PlanAction {
-  action: PlanActionType;
-  element_index: number | null;
-  element_indexes: number[] | null;
-  expected_label: string | null;
-  expected_role: string | null;
-  value: string | null;
-  file: string | null;
-  reason: string | null;
-  ms: number | null;
-}
-
-export interface ActionPlan {
-  goal: string;
-  actions: PlanAction[];
-  forbidden_actions: PlanAction[];
-  validation: {
-    required_element_indexes: number[];
-    stop_before_submit: boolean;
-  };
-  unresolved_items: string[];
-}
-
-export interface RuntimeAttachedFile {
-  key: string;
-  name: string;
-  mimeType: string;
-  base64: string;
-}
-
-export interface PlanStepPayload {
-  action: PlanStepActionType;
-  element_index: number | null;
-  element_indexes: number[] | null;
-  expected_label: string | null;
-  expected_role: string | null;
-  value: string | null;
-  file?: RuntimeAttachedFile | null;
-  ms: number | null;
-}
+export type {
+  ActionPlan,
+  PauseDecision,
+  PauseRequest,
+  PlanAction,
+  PlanActionType,
+  PlanStepActionType,
+  PlanStepPayload,
+  PlanStepResult,
+  RuntimeAttachedFile,
+  RunReport,
+  RunStepRecord,
+  RunStepStatus,
+} from './plan-runner/types';
 
 export interface PlanStepRequest {
   tabId: number;
   url: string;
   extensionId?: string;
-  step: PlanStepPayload;
-}
-
-export interface PlanStepResult {
-  ok: boolean;
-  verified?: boolean;
-  acted?: boolean;
-  error?: string;
-  details?: {
-    nodeId?: number;
-    matchedLabel?: string;
-    matchedRole?: string;
-    valueAfter?: string;
-  };
+  step: import('./plan-runner/types').PlanStepPayload;
 }

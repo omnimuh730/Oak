@@ -1,0 +1,150 @@
+/** Split / format DOM trees for AI Analyze prompts. */
+
+export interface DomTreeNode {
+  nodeId: number;
+  tag: string;
+  id?: string;
+  classes?: string[];
+  attrs?: Record<string, string>;
+  text?: string;
+  children: DomTreeNode[];
+}
+
+export interface PureNode {
+  tag: string;
+  id: number;
+  text?: string;
+  /** Useful form/control attrs e.g. type=file name=email aria-required=true */
+  detail?: string;
+  children: PureNode[];
+}
+
+export interface MetaNode {
+  id: number;
+  domId?: string;
+  classes?: string[];
+  attrs?: Record<string, string>;
+  children: MetaNode[];
+}
+
+const DETAIL_TAGS = new Set([
+  'a',
+  'button',
+  'fieldset',
+  'form',
+  'input',
+  'label',
+  'li',
+  'option',
+  'select',
+  'textarea',
+]);
+
+const DETAIL_ATTR_KEYS = [
+  'for',
+  'type',
+  'role',
+  'name',
+  'aria-label',
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-required',
+  'aria-invalid',
+  'aria-checked',
+  'autocomplete',
+  'placeholder',
+  'value',
+  'data-automation-id',
+  'data-fkit-id',
+  'selected',
+  'checked',
+] as const;
+
+export function splitDomTree(root: DomTreeNode): { pure: PureNode; meta: MetaNode } {
+  return {
+    pure: toPureNode(root),
+    meta: toMetaNode(root),
+  };
+}
+
+function toPureNode(node: DomTreeNode): PureNode {
+  const pure: PureNode = {
+    tag: node.tag,
+    id: node.nodeId,
+    children: node.children.map(toPureNode),
+  };
+  if (node.text) pure.text = node.text;
+  if (DETAIL_TAGS.has(node.tag) && (node.attrs || node.id)) {
+    const parts: string[] = [];
+    if (node.id) parts.push(`domId=${node.id}`);
+    for (const key of DETAIL_ATTR_KEYS) {
+      const value = node.attrs?.[key];
+      if (value) parts.push(`${key}=${formatDetailValue(value)}`);
+    }
+    if (parts.length > 0) pure.detail = parts.join(' ');
+  }
+  return pure;
+}
+
+function formatDetailValue(value: string): string {
+  return /\s/.test(value) ? JSON.stringify(value) : value;
+}
+
+function toMetaNode(node: DomTreeNode): MetaNode {
+  const meta: MetaNode = {
+    id: node.nodeId,
+    children: node.children.map(toMetaNode),
+  };
+  if (node.id) meta.domId = node.id;
+  if (node.classes?.length) meta.classes = node.classes;
+  if (node.attrs && Object.keys(node.attrs).length > 0) meta.attrs = node.attrs;
+  return meta;
+}
+
+function formatPureNodeLine(pure: PureNode): string {
+  const detailPart = pure.detail ? ` ${pure.detail}` : '';
+  const textPart = pure.text ? ` "${pure.text}"` : '';
+  return `${pure.tag}[${pure.id}]${detailPart}${textPart}`;
+}
+
+export function formatPureTreePreview(pure: PureNode, depth = 0): string {
+  const indent = '  '.repeat(depth);
+  const lines = [`${indent}${formatPureNodeLine(pure)}`];
+  for (const child of pure.children) {
+    lines.push(formatPureTreePreview(child, depth + 1));
+  }
+  return lines.join('\n');
+}
+
+function buildPureIndex(pure: PureNode, map = new Map<number, PureNode>()): Map<number, PureNode> {
+  map.set(pure.id, pure);
+  for (const child of pure.children) buildPureIndex(child, map);
+  return map;
+}
+
+function formatMetaLine(meta: MetaNode, pureById: Map<number, PureNode>, depth: number): string {
+  const indent = '  '.repeat(depth);
+  const pure = pureById.get(meta.id);
+  const tag = pure?.tag ?? '?';
+
+  const parts: string[] = [`[${meta.id}]`, `<${tag}>`];
+  if (meta.domId) parts.push(`#${meta.domId}`);
+  if (meta.classes?.length) parts.push(`.${meta.classes.join('.')}`);
+  if (meta.attrs) {
+    const attrStr = Object.entries(meta.attrs)
+      .map(([k, v]) => `${k}="${v}"`)
+      .join(' ');
+    if (attrStr) parts.push(attrStr);
+  }
+
+  const lines = [`${indent}${parts.join(' ')}`];
+  for (const child of meta.children) {
+    lines.push(formatMetaLine(child, pureById, depth + 1));
+  }
+  return lines.join('\n');
+}
+
+export function formatMetaTreePreview(meta: MetaNode, pure: PureNode): string {
+  const pureById = buildPureIndex(pure);
+  return formatMetaLine(meta, pureById, 0);
+}

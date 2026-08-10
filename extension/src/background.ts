@@ -1,4 +1,6 @@
 import { io, Socket } from 'socket.io-client';
+import type { PipelineProgress } from '../../shared/pipeline-types';
+import { runFabPipeline } from './pipeline/run-pipeline';
 import { sendPlanStepToTab } from './tab-messaging';
 import {
   DEFAULT_AI_SERVER,
@@ -15,6 +17,25 @@ import {
 
 let socket: Socket | null = null;
 let socketConnected = false;
+let pipelineRunningTabId: number | null = null;
+
+async function broadcastPipelineProgress(tabId: number, progress: PipelineProgress): Promise<void> {
+  socket?.emit('pipeline:progress', { tabId, progress });
+
+  const message = { type: MSG.PIPELINE_PROGRESS, progress };
+  try {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId });
+    for (const frame of frames ?? []) {
+      chrome.tabs.sendMessage(tabId, message, { frameId: frame.frameId }, () => {
+        void chrome.runtime.lastError;
+      });
+    }
+  } catch {
+    chrome.tabs.sendMessage(tabId, message, () => {
+      void chrome.runtime.lastError;
+    });
+  }
+}
 
 const KEEP_ALIVE_ALARM = 'oak-socket-keep-alive';
 chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 });
@@ -128,9 +149,55 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.SOCKET_STATUS) {
     sendResponse({ connected: socketConnected });
+    return true;
+  }
+
+  if (message.type === MSG.START_PIPELINE) {
+    const tabId = sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ error: 'No tab for pipeline' });
+      return true;
+    }
+    if (pipelineRunningTabId != null) {
+      sendResponse({ error: 'A pipeline is already running' });
+      return true;
+    }
+
+    pipelineRunningTabId = tabId;
+    sendResponse({ ok: true });
+
+    void (async () => {
+      try {
+        const stored = await chrome.storage.local.get(['aiServerUrl']);
+        const aiServerUrl =
+          (stored.aiServerUrl as string | undefined) || DEFAULT_AI_SERVER;
+
+        await runFabPipeline({
+          tabId,
+          preferredFrameId: sender.frameId ?? null,
+          aiServerUrl,
+          emitDomTree: (payload) => {
+            socket?.emit('dom:tree', payload);
+          },
+          onProgress: (progress) => {
+            void broadcastPipelineProgress(tabId, progress);
+          },
+        });
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        await broadcastPipelineProgress(tabId, {
+          phase: 'error',
+          message: 'Failed',
+          error,
+        });
+      } finally {
+        pipelineRunningTabId = null;
+      }
+    })();
+
     return true;
   }
 

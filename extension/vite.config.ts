@@ -1,11 +1,23 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { crx } from '@crxjs/vite-plugin';
 import manifest from './manifest.json';
 
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig({
   base: './',
   plugins: [react(), crx({ manifest })],
+  resolve: {
+    alias: {
+      '@oak/shared': path.resolve(rootDir, '../shared'),
+    },
+  },
+  server: {
+    fs: { allow: [rootDir, path.resolve(rootDir, '..')] },
+  },
   build: {
     rollupOptions: {
       input: {

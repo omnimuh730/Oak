@@ -53,6 +53,14 @@ io.on('connection', (socket) => {
     socket.emit('dom:tree:sent', meta);
   });
 
+  // FAB one-click pipeline progress (extension → UI board / other clients)
+  socket.on('pipeline:progress', (payload) => {
+    const phase = payload?.progress?.phase ?? payload?.phase ?? 'unknown';
+    const tabId = payload?.tabId ?? null;
+    console.log(`[pipeline:progress] tab=${tabId} phase=${phase}`);
+    socket.broadcast.emit('pipeline:progress', payload);
+  });
+
   socket.on('dom:highlight', (payload) => {
     const { extensionId, nodeId, tabId, url } = payload ?? {};
     if (nodeId == null || !tabId) return;

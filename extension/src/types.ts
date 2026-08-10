@@ -31,6 +31,8 @@ export const MSG = {
   EXECUTE_ACTIONS: 'oak:execute-actions',
   PLAN_STEP: 'oak:plan-step',
   MATCH_OPTION: 'oak:match-option',
+  START_PIPELINE: 'oak:start-pipeline',
+  PIPELINE_PROGRESS: 'oak:pipeline-progress',
   SIDEBAR_OPEN: 'oak:sidebar-open',
   SIDEBAR_CLOSE: 'oak:sidebar-close',
   SOCKET_STATUS: 'oak:socket-status',

@@ -1,3 +1,4 @@
+import type { PipelineProgress } from '../../../shared/pipeline-types';
 import { MSG } from '../types';
 
 const HOST_ID = 'oak-extension-host';
@@ -22,7 +23,8 @@ function mountOakUI(): void {
   const host = document.createElement('div');
   host.id = HOST_ID;
   host.setAttribute('data-oak-ui', 'true');
-  host.style.cssText = 'all: initial; position: fixed; inset: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none;';
+  host.style.cssText =
+    'all: initial; position: fixed; inset: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none;';
   target.appendChild(host);
 
   const shadow = host.attachShadow({ mode: 'open' });
@@ -31,14 +33,17 @@ function mountOakUI(): void {
   style.textContent = STYLES;
   shadow.appendChild(style);
 
-  // Floating action button
   const fab = document.createElement('button');
   fab.className = 'oak-fab';
-  fab.title = 'Open Oak';
-  fab.innerHTML = `<span class="oak-fab-icon">🌳</span>`;
+  fab.title = 'Run Oak: Fetch → Analyze → Fill';
+  fab.type = 'button';
+  fab.innerHTML = `
+    <span class="oak-fab-icon">🌳</span>
+    <span class="oak-fab-status" hidden></span>
+  `;
   shadow.appendChild(fab);
 
-  // Sidebar panel
+  // Sidebar kept for toolbar toggle / debug; FAB no longer opens it.
   const sidebar = document.createElement('div');
   sidebar.className = 'oak-sidebar';
   sidebar.innerHTML = `
@@ -51,15 +56,70 @@ function mountOakUI(): void {
   shadow.appendChild(sidebar);
 
   const closeBtn = sidebar.querySelector('.oak-close') as HTMLButtonElement;
+  const statusEl = fab.querySelector('.oak-fab-status') as HTMLSpanElement;
+  const iconEl = fab.querySelector('.oak-fab-icon') as HTMLSpanElement;
+
   let open = false;
+  let pipelineBusy = false;
 
   function setOpen(value: boolean) {
     open = value;
     sidebar.classList.toggle('open', open);
-    fab.classList.toggle('hidden', open);
   }
 
-  fab.addEventListener('click', () => setOpen(true));
+  function applyProgress(progress: PipelineProgress) {
+    const busy =
+      progress.phase === 'fetching' ||
+      progress.phase === 'analyzing' ||
+      progress.phase === 'running';
+
+    pipelineBusy = busy;
+    fab.classList.toggle('busy', busy);
+    fab.classList.toggle('done', progress.phase === 'done');
+    fab.classList.toggle('error', progress.phase === 'error');
+    fab.classList.toggle('expanded', progress.phase !== 'idle');
+    fab.disabled = busy;
+
+    if (progress.phase === 'idle') {
+      statusEl.hidden = true;
+      statusEl.textContent = '';
+      iconEl.hidden = false;
+      fab.title = 'Run Oak: Fetch → Analyze → Fill';
+      return;
+    }
+
+    statusEl.hidden = false;
+    iconEl.hidden = false;
+    statusEl.textContent = progress.message;
+    fab.title = progress.error
+      ? progress.error
+      : progress.stepLabel
+        ? `${progress.message} — ${progress.stepLabel}`
+        : progress.message;
+  }
+
+  fab.addEventListener('click', () => {
+    if (pipelineBusy) return;
+    applyProgress({ phase: 'fetching', message: 'Starting…' });
+    chrome.runtime.sendMessage({ type: MSG.START_PIPELINE }, (res) => {
+      if (chrome.runtime.lastError) {
+        applyProgress({
+          phase: 'error',
+          message: 'Failed to start',
+          error: chrome.runtime.lastError.message,
+        });
+        return;
+      }
+      if (res?.error) {
+        applyProgress({
+          phase: 'error',
+          message: 'Failed to start',
+          error: String(res.error),
+        });
+      }
+    });
+  });
+
   closeBtn.addEventListener('click', () => setOpen(false));
 
   window.addEventListener('message', (e) => {
@@ -69,6 +129,10 @@ function mountOakUI(): void {
   chrome.runtime.onMessage.addListener((message) => {
     if (message.type === MSG.TOGGLE_SIDEBAR) {
       setOpen(!open);
+      return;
+    }
+    if (message.type === MSG.PIPELINE_PROGRESS && message.progress) {
+      applyProgress(message.progress as PipelineProgress);
     }
   });
 }
@@ -104,29 +168,70 @@ const STYLES = `
     position: fixed;
     bottom: 36px;
     left: 24px;
-    width: 52px;
+    min-width: 52px;
     height: 52px;
-    border-radius: 50%;
+    padding: 0 14px;
+    border-radius: 999px;
     border: none;
     cursor: pointer;
     pointer-events: auto;
-    background: linear-gradient(135deg, #7c6cf0, #5b4cdb);
-    box-shadow: 0 4px 20px rgba(124, 108, 240, 0.45), 0 2px 8px rgba(0,0,0,0.2);
+    background: linear-gradient(135deg, #2f6f4e, #1f4d36);
+    box-shadow: 0 4px 20px rgba(31, 77, 54, 0.4), 0 2px 8px rgba(0,0,0,0.2);
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+    gap: 8px;
+    transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s, width 0.2s, background 0.2s;
     z-index: 2147483647;
+    color: #f3faf5;
   }
 
-  .oak-fab:hover {
-    transform: scale(1.08);
-    box-shadow: 0 6px 28px rgba(124, 108, 240, 0.55);
+  .oak-fab:hover:not(:disabled) {
+    transform: scale(1.05);
+    box-shadow: 0 6px 28px rgba(31, 77, 54, 0.5);
   }
 
-  .oak-fab.hidden { opacity: 0; pointer-events: none; transform: scale(0.8); }
+  .oak-fab:disabled {
+    cursor: default;
+    opacity: 0.95;
+  }
 
-  .oak-fab-icon { font-size: 24px; line-height: 1; }
+  .oak-fab.expanded {
+    padding-right: 16px;
+  }
+
+  .oak-fab.busy {
+    background: linear-gradient(135deg, #3d7a56, #285c40);
+  }
+
+  .oak-fab.busy .oak-fab-icon {
+    animation: oak-spin 1.2s linear infinite;
+  }
+
+  .oak-fab.done {
+    background: linear-gradient(135deg, #2f6f4e, #245a3d);
+  }
+
+  .oak-fab.error {
+    background: linear-gradient(135deg, #8b3a3a, #6b2a2a);
+  }
+
+  .oak-fab-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+
+  .oak-fab-status {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  @keyframes oak-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
 
   .oak-sidebar {
     position: fixed;

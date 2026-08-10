@@ -1,0 +1,307 @@
+import { collectForbiddenIndexes, targetsForbiddenIndex } from './forbidden';
+import type {
+  ActionPlan,
+  PauseDecision,
+  PauseRequest,
+  PlanAction,
+  PlanStepActionType,
+  PlanStepPayload,
+  PlanStepResult,
+  RuntimeAttachedFile,
+  RunReport,
+  RunStepRecord,
+} from './types';
+
+export interface OrchestratorHooks {
+  onSteps: (steps: RunStepRecord[]) => void;
+  onPause: (request: PauseRequest) => Promise<PauseDecision>;
+}
+
+export interface RunPlanOptions {
+  plan: ActionPlan;
+  /** Execute one plan step against the live page (socket or direct tab message). */
+  executeStep: (step: PlanStepPayload) => Promise<PlanStepResult>;
+  runtimeFile: RuntimeAttachedFile | null;
+  hooks: OrchestratorHooks;
+}
+
+function isExecutableStep(action: PlanAction['action']): boolean {
+  return (
+    action === 'fill' ||
+    action === 'upload' ||
+    action === 'select_radio' ||
+    action === 'wait' ||
+    action === 'validate'
+  );
+}
+
+function toStepPayload(
+  action: PlanAction,
+  runtimeFile: RuntimeAttachedFile | null,
+): PlanStepPayload {
+  const needsFile = action.action === 'upload';
+  return {
+    action: action.action as PlanStepActionType,
+    element_index: action.element_index,
+    element_indexes: action.element_indexes,
+    expected_label: action.expected_label,
+    expected_role: action.expected_role,
+    value: action.value,
+    file: needsFile ? runtimeFile : null,
+    ms: action.ms,
+  };
+}
+
+function summarize(steps: RunStepRecord[]): RunReport['summary'] {
+  return {
+    ok: steps.filter((s) => s.status === 'ok').length,
+    skipped: steps.filter((s) => s.status === 'skipped').length,
+    blocked: steps.filter((s) => s.status === 'blocked').length,
+    failed: steps.filter((s) => s.status === 'failed').length,
+    paused: steps.filter((s) => s.status === 'paused').length,
+  };
+}
+
+export async function runActionPlan(options: RunPlanOptions): Promise<RunReport> {
+  const { plan, executeStep, runtimeFile, hooks } = options;
+  const forbidden = collectForbiddenIndexes(plan);
+  const stopBeforeSubmit = plan.validation?.stop_before_submit !== false;
+
+  const steps: RunStepRecord[] = (plan.actions ?? []).map((action, index) => ({
+    index,
+    action: action.action,
+    element_index: action.element_index,
+    expected_label: action.expected_label,
+    status: 'pending',
+  }));
+  hooks.onSteps([...steps]);
+
+  let aborted = false;
+
+  const publish = () => hooks.onSteps([...steps]);
+
+  for (let i = 0; i < (plan.actions ?? []).length; i++) {
+    if (aborted) {
+      steps[i].status = 'aborted';
+      publish();
+      continue;
+    }
+
+    const action = plan.actions[i];
+    steps[i].status = 'running';
+    publish();
+
+    if (action.action === 'forbidden') {
+      steps[i].status = 'blocked';
+      steps[i].message = action.reason || 'Forbidden action marker';
+      publish();
+      continue;
+    }
+
+    if (stopBeforeSubmit && targetsForbiddenIndex(action, forbidden) && action.action !== 'pause_for_review') {
+      steps[i].status = 'blocked';
+      steps[i].message = 'Blocked: targets a forbidden element index';
+      publish();
+      continue;
+    }
+
+    if (action.action === 'pause_for_review') {
+      steps[i].status = 'paused';
+      publish();
+
+      const canAutofillPause =
+        action.element_index != null &&
+        typeof action.value === 'string' &&
+        action.value.trim().length > 0;
+
+      const decision = await hooks.onPause({
+        index: i,
+        action: action.action,
+        element_index: action.element_index,
+        expected_label: action.expected_label,
+        reason: action.reason || 'Paused for human review',
+        kind: 'planned',
+      });
+
+      if (decision === 'abort') {
+        steps[i].status = 'aborted';
+        steps[i].message = 'Aborted by user';
+        aborted = true;
+        publish();
+        break;
+      }
+      if (decision === 'skip') {
+        steps[i].status = 'skipped';
+        steps[i].message = 'Skipped by user';
+        publish();
+        continue;
+      }
+
+      if (canAutofillPause) {
+        try {
+          const result = await executeStep({
+            action: 'select_radio',
+            element_index: action.element_index,
+            element_indexes: null,
+            expected_label: action.expected_label,
+            expected_role: action.expected_role,
+            value: action.value,
+            file: null,
+            ms: null,
+          });
+          if (result.ok) {
+            steps[i].status = 'ok';
+            steps[i].message = result.details?.valueAfter
+              ? `value=${result.details.valueAfter}`
+              : 'Reviewed — autofilled';
+            publish();
+            continue;
+          }
+          steps[i].status = 'failed';
+          steps[i].message = result.error || 'Pause autofill failed';
+          publish();
+          continue;
+        } catch (err) {
+          steps[i].status = 'failed';
+          steps[i].message = err instanceof Error ? err.message : String(err);
+          publish();
+          continue;
+        }
+      }
+
+      steps[i].status = 'ok';
+      steps[i].message = 'Reviewed — continued';
+      publish();
+      continue;
+    }
+
+    if (!isExecutableStep(action.action)) {
+      steps[i].status = 'failed';
+      steps[i].message = `Unsupported action: ${action.action}`;
+      publish();
+      continue;
+    }
+
+    if (action.action === 'upload' && !runtimeFile) {
+      const decision = await hooks.onPause({
+        index: i,
+        action: action.action,
+        element_index: action.element_index,
+        expected_label: action.expected_label,
+        reason: 'Upload requires FILE_PATH runtime file, but none was loaded',
+        kind: 'error',
+      });
+      if (decision === 'abort') {
+        steps[i].status = 'aborted';
+        aborted = true;
+        publish();
+        break;
+      }
+      if (decision === 'skip') {
+        steps[i].status = 'skipped';
+        steps[i].message = 'Skipped missing upload file';
+        publish();
+        continue;
+      }
+    }
+
+    let done = false;
+    while (!done && !aborted) {
+      try {
+        if (action.action === 'upload' && !runtimeFile) {
+          throw new Error('Upload requires FILE_PATH runtime file');
+        }
+
+        const result = await executeStep(toStepPayload(action, runtimeFile));
+
+        if (result.ok) {
+          steps[i].status = 'ok';
+          steps[i].message = result.details?.valueAfter
+            ? `value=${result.details.valueAfter}`
+            : undefined;
+          publish();
+          done = true;
+          break;
+        }
+
+        steps[i].status = 'paused';
+        steps[i].message = result.error || 'Step failed';
+        publish();
+
+        const decision = await hooks.onPause({
+          index: i,
+          action: action.action,
+          element_index: action.element_index,
+          expected_label: action.expected_label,
+          reason: result.error || 'Step failed verification or action',
+          kind: 'error',
+        });
+
+        if (decision === 'abort') {
+          steps[i].status = 'aborted';
+          steps[i].message = result.error || 'Aborted';
+          aborted = true;
+          publish();
+          done = true;
+        } else if (decision === 'skip') {
+          steps[i].status = 'skipped';
+          steps[i].message = result.error || 'Skipped after failure';
+          publish();
+          done = true;
+        } else {
+          steps[i].status = 'running';
+          steps[i].message = 'Retrying...';
+          publish();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        steps[i].status = 'paused';
+        steps[i].message = message;
+        publish();
+
+        const decision = await hooks.onPause({
+          index: i,
+          action: action.action,
+          element_index: action.element_index,
+          expected_label: action.expected_label,
+          reason: message,
+          kind: 'error',
+        });
+
+        if (decision === 'abort') {
+          steps[i].status = 'aborted';
+          steps[i].message = message;
+          aborted = true;
+          publish();
+          done = true;
+        } else if (decision === 'skip') {
+          steps[i].status = 'skipped';
+          steps[i].message = message;
+          publish();
+          done = true;
+        } else {
+          steps[i].status = 'running';
+          steps[i].message = 'Retrying...';
+          publish();
+        }
+      }
+    }
+  }
+
+  if (aborted) {
+    for (const step of steps) {
+      if (step.status === 'pending' || step.status === 'running') {
+        step.status = 'aborted';
+      }
+    }
+    publish();
+  }
+
+  const summary = summarize(steps);
+  return {
+    ok: !aborted && summary.failed === 0,
+    aborted,
+    steps,
+    summary,
+  };
+}
