@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import type { AttachedFile } from '../automation-types';
+import type { TokenConsume } from '../token-usage';
+import { formatConsumeUsd, formatTokenCount } from '../token-usage';
 import './ActionBuilderModal.css';
 import './ScriptEvalModal.css';
 
@@ -8,6 +10,7 @@ interface Props {
   running: boolean;
   output: string | null;
   error: string | null;
+  consume: TokenConsume | null;
   code: string;
   files: AttachedFile[];
   onCodeChange: (code: string) => void;
@@ -96,6 +99,7 @@ export function ScriptEvalModal({
   running,
   output,
   error,
+  consume,
   code,
   files,
   onCodeChange,
@@ -226,6 +230,41 @@ export function ScriptEvalModal({
           )}
 
           {fileWarning && <p className="script-eval-file-warning">{fileWarning}</p>}
+
+          {consume && (
+            <div className="script-eval-usage">
+              <div className="script-eval-usage-label">AI usage</div>
+              <dl className="script-eval-usage-grid">
+                <div>
+                  <dt>Model</dt>
+                  <dd title={consume.pricingModel ?? consume.model}>{consume.model}</dd>
+                </div>
+                <div>
+                  <dt>Input tokens (cached)</dt>
+                  <dd>{formatTokenCount(consume.inputCached)}</dd>
+                </div>
+                <div>
+                  <dt>Input tokens (cache miss)</dt>
+                  <dd>{formatTokenCount(consume.inputCacheMiss)}</dd>
+                </div>
+                <div>
+                  <dt>Output tokens</dt>
+                  <dd>{formatTokenCount(consume.output)}</dd>
+                </div>
+                <div className="script-eval-usage-consume">
+                  <dt>Consume</dt>
+                  <dd>
+                    {formatConsumeUsd(consume.costUsd)}
+                    {!consume.pricingFound && (
+                      <span className="script-eval-usage-warning" title="No standard-tier price found in API-Price.md for this model">
+                        {' '}pricing unavailable
+                      </span>
+                    )}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          )}
 
           {(output !== null || error) && (
             <div className={`script-eval-output ${error ? 'error' : ''}`}>

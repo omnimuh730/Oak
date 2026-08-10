@@ -13,6 +13,8 @@ import { ContentModal } from './components/ContentModal';
 import { ContextMenu, type ContextMenuState } from './components/ContextMenu';
 import { DomTreeView } from './components/DomTreeView';
 import { ScriptEvalModal } from './components/ScriptEvalModal';
+import type { TokenConsume } from './token-usage';
+import { mergeConsumeTotals } from './token-usage';
 import './App.css';
 
 const DEFAULT_SERVER = 'http://localhost:3847';
@@ -23,6 +25,8 @@ interface GenerateEvalScriptResponse {
   ok?: boolean;
   code?: string;
   responseId?: string | null;
+  model?: string;
+  consume?: TokenConsume | null;
   error?: string;
 }
 
@@ -55,6 +59,7 @@ export default function App() {
   const [autoGenerateRunning, setAutoGenerateRunning] = useState(false);
   const [reanalyzeRunning, setReanalyzeRunning] = useState(false);
   const [scriptEvalAiResponseId, setScriptEvalAiResponseId] = useState<string | null>(null);
+  const [scriptEvalConsume, setScriptEvalConsume] = useState<TokenConsume | null>(null);
   const [scriptEvalOutput, setScriptEvalOutput] = useState<string | null>(null);
   const [scriptEvalError, setScriptEvalError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -197,6 +202,7 @@ export default function App() {
     closeContextMenu();
     setScriptEvalOutput(null);
     setScriptEvalError(null);
+    setScriptEvalConsume(null);
     setScriptEvalOakNodeId(oakNodeId ?? null);
     setScriptEvalOpen(true);
   };
@@ -207,6 +213,7 @@ export default function App() {
     setScriptEvalOakNodeId(null);
     setScriptEvalFiles([]);
     setScriptEvalAiResponseId(null);
+    setScriptEvalConsume(null);
     setScriptEvalOutput(null);
     setScriptEvalError(null);
   };
@@ -354,6 +361,7 @@ export default function App() {
     setAutoGenerateRunning(true);
     setScriptEvalOutput(null);
     setScriptEvalError(null);
+    setScriptEvalConsume(null);
 
     try {
       let analyzeText = formatPureTreeForAnalyze(splitTrees.pure, {
@@ -394,6 +402,7 @@ export default function App() {
       setScriptEvalFiles(filesForRun);
       setScriptEvalOakNodeId(null);
       setScriptEvalAiResponseId(generation.responseId ?? null);
+      setScriptEvalConsume(generation.consume ?? null);
       setScriptEvalOpen(true);
       showToast('Generated eval script; running now');
 
@@ -455,6 +464,7 @@ export default function App() {
       setScriptEvalCode(repairedCode);
       setScriptEvalFiles(filesForRun);
       setScriptEvalAiResponseId(generation.responseId ?? scriptEvalAiResponseId);
+      setScriptEvalConsume((prev) => mergeConsumeTotals(prev, generation.consume ?? null));
       showToast('Reanalyzed result; running repair once');
 
       runScriptEval({ code: repairedCode, files: filesForRun, oakNodeId: null });
@@ -640,6 +650,7 @@ export default function App() {
           running={scriptEvalRunning}
           output={scriptEvalOutput}
           error={scriptEvalError}
+          consume={scriptEvalConsume}
           code={scriptEvalCode}
           files={scriptEvalFiles}
           onCodeChange={setScriptEvalCode}

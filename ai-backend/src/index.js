@@ -4,6 +4,7 @@ import express from 'express';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { calculateConsume } from './pricing.js';
 
 const PORT = process.env.AI_PORT || 3848;
 const OPENAI_API_URL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/responses';
@@ -67,12 +68,14 @@ app.post('/api/generate-eval-script', async (req, res) => {
 
     const ai = await requestEvalScript(systemPrompt, userPrompt);
     const code = extractJavaScript(ai.text);
+    const consume = calculateConsume(ai.model, ai.usage);
 
     res.json({
       ok: true,
       code,
       responseId: ai.responseId,
-      model: OPENAI_MODEL,
+      model: ai.model,
+      consume,
       resumeKey,
       promptInputs: {
         analyzeText: 'Copy for Analyze DOM text',
@@ -125,12 +128,14 @@ app.post('/api/repair-eval-script', async (req, res) => {
       previousResponseId,
     });
     const code = extractJavaScript(ai.text);
+    const consume = calculateConsume(ai.model, ai.usage);
 
     res.json({
       ok: true,
       code,
       responseId: ai.responseId,
-      model: OPENAI_MODEL,
+      model: ai.model,
+      consume,
       previousResponseId: previousResponseId || null,
       resumeKey,
     });
@@ -338,6 +343,8 @@ async function requestEvalScript(systemPrompt, userPrompt, options = {}) {
   return {
     text,
     responseId: typeof data?.id === 'string' ? data.id : null,
+    model: typeof data?.model === 'string' ? data.model : OPENAI_MODEL,
+    usage: data?.usage ?? null,
   };
 }
 

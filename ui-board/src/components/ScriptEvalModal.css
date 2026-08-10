@@ -156,6 +156,60 @@
   color: #c88;
 }
 
+.script-eval-usage {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg));
+  overflow: hidden;
+}
+
+.script-eval-usage-label {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.script-eval-usage-grid {
+  margin: 0;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 16px;
+}
+
+.script-eval-usage-grid > div {
+  min-width: 0;
+}
+
+.script-eval-usage-grid dt {
+  margin: 0 0 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.script-eval-usage-grid dd {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.script-eval-usage-consume dd {
+  color: var(--accent);
+}
+
+.script-eval-usage-warning {
+  font-size: 11px;
+  font-weight: 400;
+  color: #c88;
+}
+
 .script-eval-hint code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
