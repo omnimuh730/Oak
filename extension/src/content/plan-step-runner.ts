@@ -1,4 +1,5 @@
 import type { PlanStepPayload, PlanStepResult } from '../types';
+import { controlAlreadyMatches } from './agents/already-filled';
 import { fillElement } from './agents/fill';
 import { readControlValue } from './agents/read-control-value';
 import { selectRadioElement } from './agents/select-radio';
@@ -76,6 +77,28 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
         matchedRole: verified.matchedRole,
       },
     };
+  }
+
+  // Resume / browser autofill may already populate the control — don't overwrite
+  // when the live value already matches the planned answer.
+  if (step.action === 'fill' || step.action === 'select_radio' || step.action === 'upload') {
+    const prior = controlAlreadyMatches(verified.element, step.value, {
+      fileName: step.file?.name ?? null,
+    });
+    if (prior.matched) {
+      return {
+        ok: true,
+        verified: true,
+        acted: false,
+        alreadyFilled: true,
+        details: {
+          nodeId: step.element_index,
+          matchedLabel: verified.matchedLabel,
+          matchedRole: verified.matchedRole,
+          valueAfter: prior.current,
+        },
+      };
+    }
   }
 
   try {

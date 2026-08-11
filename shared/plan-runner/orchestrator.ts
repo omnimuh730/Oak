@@ -215,10 +215,17 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
         const result = await executeStep(toStepPayload(action, runtimeFile));
 
         if (result.ok) {
-          steps[i].status = 'ok';
-          steps[i].message = result.details?.valueAfter
-            ? `value=${result.details.valueAfter}`
-            : undefined;
+          if (result.alreadyFilled) {
+            steps[i].status = 'skipped';
+            steps[i].message = result.details?.valueAfter
+              ? `already=${result.details.valueAfter}`
+              : 'Already filled';
+          } else {
+            steps[i].status = 'ok';
+            steps[i].message = result.details?.valueAfter
+              ? `value=${result.details.valueAfter}`
+              : undefined;
+          }
           publish();
           done = true;
           break;

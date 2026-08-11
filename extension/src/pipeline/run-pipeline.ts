@@ -162,6 +162,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
           ok: Boolean(res.ok),
           verified: res.verified,
           acted: res.acted,
+          alreadyFilled: Boolean(res.alreadyFilled),
           error: res.error,
           details: {
             nodeId: typeof details.nodeId === 'number' ? details.nodeId : undefined,

@@ -62,6 +62,8 @@ export interface PlanStepResult {
   ok: boolean;
   verified?: boolean;
   acted?: boolean;
+  /** True when the control already had the intended value. */
+  alreadyFilled?: boolean;
   error?: string;
   details?: {
     nodeId?: number;

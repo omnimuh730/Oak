@@ -54,6 +54,7 @@ export async function sendPlanStepToTab(
   ok: boolean;
   verified?: boolean;
   acted?: boolean;
+  alreadyFilled?: boolean;
   error?: string;
   details?: Record<string, unknown>;
 }> {
@@ -69,8 +70,10 @@ export async function sendPlanStepToTab(
       ok: boolean;
       verified?: boolean;
       acted?: boolean;
+      alreadyFilled?: boolean;
       error?: string;
       details?: Record<string, unknown>;
+      /** Frame routing only: this content script is not the form frame. */
       skipped?: boolean;
     }>(tabId, message, frameId);
   };

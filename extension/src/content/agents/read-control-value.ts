@@ -62,8 +62,14 @@ export function readControlValue(el: Element | null): string {
     }
 
     const role = (el.getAttribute('role') || '').toLowerCase();
+    const cls = typeof el.className === 'string' ? el.className : '';
     const isCombobox =
-      role === 'combobox' || el.getAttribute('aria-haspopup') === 'listbox' || el.getAttribute('aria-haspopup') === 'true';
+      role === 'combobox' ||
+      el.getAttribute('aria-haspopup') === 'listbox' ||
+      el.getAttribute('aria-haspopup') === 'true' ||
+      el.getAttribute('aria-autocomplete') === 'list' ||
+      (el.hasAttribute('aria-expanded') && el.hasAttribute('aria-controls')) ||
+      /\bselect__input\b/i.test(cls);
     if (isCombobox) {
       const displayed = readComboboxDisplayValue(el);
       if (displayed) return displayed;
