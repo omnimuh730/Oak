@@ -1,49 +1,53 @@
 # Oak
 
-System for capturing page DOM trees from a Chrome extension, visualizing them on a React UI board, and generating structured AI action plans from Pure/Meta trees.
+Chrome extension + React UI board for capturing page DOM trees, generating structured AI action plans, and running fill automation.
+
+**Backend lives in athens-backend** (`/api/oak` + Socket.io path `/oak` on port **8980**). There is no separate Oak Express server.
 
 ## Architecture
 
 ```
-┌─────────────────────┐     socket.io      ┌──────────────────┐
-│  Chrome Extension   │ ◄────────────────► │  Node Backend    │
-│  (floating + sidebar)│                    │  (port 3847)     │
-└──────────┬──────────┘                    └────────┬─────────┘
-           │ fetch DOM                             │ broadcast
-           ▼                                       ▼
-    Page DOM tree                          ┌──────────────────┐
-                                           │  React UI Board  │
-                                           │  (port 5173)     │
-                                           └────────┬─────────┘
-                                                    │ HTTP
-                                                    ▼
-                                           ┌──────────────────┐
-                                           │  AI Backend      │
-                                           │  (port 3848)     │
-                                           └──────────────────┘
+┌─────────────────────┐   socket.io /oak    ┌──────────────────────┐
+│  Chrome Extension   │ ◄─────────────────► │  athens-backend      │
+│  (FAB + sidebar)    │                     │  :8980               │
+└──────────┬──────────┘   HTTP /api/oak/*   └──────────┬───────────┘
+           │ fetch DOM                                 │ broadcast
+           ▼                                           ▼
+    Page DOM tree                              ┌──────────────────┐
+                                               │  React UI Board  │
+                                               │  (port 5173)     │
+                                               └──────────────────┘
 ```
+
+Auth: Athens account username + password (`POST /api/oak/auth/signin`). AI Analyze uses the signed-in profile’s LLM key + default model, and sanitized `autoBidProfile` (secrets stripped) instead of a local `profile.md`.
 
 ## Projects
 
 | Project | Path | Description |
 |---------|------|-------------|
-| Backend | `backend/` | Express + Socket.io relay server |
-| AI Backend | `ai-backend/` | Express service that builds job-application action plans from Pure/Meta trees |
-| UI Board | `ui-board/` | React app with AVL-style DOM tree visualization |
-| Extension | `extension/` | Chrome MV3 extension with Monica-like floating button + sidebar |
+| UI Board | `ui-board/` | React app with DOM tree visualization + AI Analyze / Run |
+| Extension | `extension/` | Chrome MV3 extension with FAB + sidebar |
+| Shared | `shared/` | Client-side plan/DOM types (not a Nest package) |
 
 ## Quick Start
 
-### 1. Install dependencies
+### 1. Start athens-backend
+
+From the monorepo `athens-backend/` package:
 
 ```bash
-npm install
+npm run start:dev
 ```
 
-### 2. Start the backend
+Ensure your Athens profile has an LLM API key and default model set in Settings. Optional Oak env knobs are documented in `athens-backend/.env.example` (`OAK_*`).
+
+Add the UI board origin to `CORS_ORIGIN` (e.g. `http://localhost:5173`).
+
+### 2. Install Oak clients
 
 ```bash
-npm run dev:backend
+cd Oak
+npm install
 ```
 
 ### 3. Start the UI board
@@ -52,31 +56,11 @@ npm run dev:backend
 npm run dev:ui-board
 ```
 
-Open http://localhost:5173
+Open http://localhost:5173 — sign in with your Athens credentials.
 
-### 4. Start the AI backend
+Optional: `VITE_ATHENS_API_URL=http://127.0.0.1:8980`
 
-Copy `.env.example` to `.env` at the repo root and set your OpenAI settings:
-
-```bash
-cp .env.example .env
-# edit .env: OPENAI_API_KEY, OPENAI_MODEL, OPENAI_REASONING_EFFORT
-npm run dev:ai-backend
-```
-
-`.env` is gitignored. Configuration:
-
-| Env var | Default | Purpose |
-|---------|---------|---------|
-| `OPENAI_API_KEY` | _(required)_ | OpenAI API key |
-| `OPENAI_MODEL` | `gpt-4.1` | Model used for AI Analyze |
-| `OPENAI_REASONING_EFFORT` | _(unset)_ | `none` / `minimal` / `low` / `medium` / `high` / `xhigh`. When set, sent as `reasoning.effort` and temperature is omitted |
-| `FILE_PATH` | _(unset)_ | Resume/CV (or other) file uploaded during plan Run |
-| `AI_PORT` | `3848` | AI backend port |
-| `PROFILE_FILE_PATH` | `profile.md` | Applicant profile source for the planner prompt |
-| `VITE_AI_SERVER_URL` | `http://localhost:3848` | UI board AI backend URL |
-
-### 5. Build & load the extension
+### 4. Build & load the extension
 
 ```bash
 npm run build -w extension
@@ -84,40 +68,34 @@ npm run build -w extension
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
-3. Click **Load unpacked**
-4. Select `extension/dist`
+3. **Load unpacked** → select `extension/dist`
+4. Open the Oak sidebar → sign in with the same Athens credentials
+5. Confirm Athens API URL is `http://127.0.0.1:8980` (or your backend host)
 
-### 6. Use it
+### 5. Use it
 
 1. Visit any website
-2. Click the floating **🌳** button (bottom-right) to open the Oak sidebar
-3. Click **Fetch DOM** in the sidebar
-4. The DOM tree appears on the UI board in real time
-5. Click **AI Analyze** to generate a JSON action plan from Pure Tree + Meta Tree (+ `profile.md`)
-6. Click **Run** to execute the plan step-by-step (verify → act). Uploads use `FILE_PATH`. `pause_for_review` and failures open Continue / Skip / Abort.
+2. Click the floating Oak logo (bottom-left) to run Fetch → Analyze → Fill (requires sign-in)
+3. Or **Fetch DOM** in the sidebar — the tree appears on the UI board
+4. On the UI board: **AI Analyze** then **Run**
 
-You can also click the extension icon in the toolbar to toggle the sidebar.
+## API (athens-backend)
 
-## How it works
+| Method | Path | Auth |
+|--------|------|------|
+| POST | `/api/oak/auth/signin` | — |
+| POST | `/api/oak/auth/signout` | Bearer |
+| GET | `/api/oak/auth/me` | Bearer |
+| GET | `/api/oak/health` | — |
+| POST | `/api/oak/ai-analyze` | Bearer |
+| POST | `/api/oak/match-option` | Bearer |
+| GET | `/api/oak/runtime-file` | Bearer |
 
-1. **Content script** injects a floating action button and slide-in sidebar (shadow DOM, Monica-style)
-2. **Fetch DOM** serializes the page DOM into a multi-child tree (skips script/style, limits depth)
-3. **Sidebar** sends the tree to the backend via Socket.io
-4. **Backend** broadcasts `dom:tree` to all connected UI board clients
-5. **UI Board** renders an expandable tree diagram with connecting lines (AVL-inspired layout, multi-child)
-6. **AI Analyze** sends Pure/Meta tree text to the AI backend, which returns a structured JSON action plan (no submit clicks)
-
-## Configuration
-
-Both the extension sidebar and UI board default to `http://localhost:3847` for the backend URL. Change it in either app's connection settings.
-
-Edit `profile.md` (or set `PROFILE_FILE_PATH`) with applicant details. Missing values become `{{PLACEHOLDER}}` fields in the plan.
+Socket.io: same host, path `/oak`, handshake `auth.token` = access token.
 
 ## Development
 
 ```bash
-# Watch-build extension
-npm run dev:extension
-
-# After changes, reload extension in chrome://extensions
+npm run dev:extension   # watch-build extension
+# Reload unpacked extension in chrome://extensions after changes
 ```

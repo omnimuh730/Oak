@@ -1,6 +1,5 @@
+import { authHeaders, getAthensApiUrl } from './auth/oak-auth';
 import type { ActionPlan, RuntimeAttachedFile } from './plan-runner/types';
-
-const DEFAULT_AI_SERVER = import.meta.env.VITE_AI_SERVER_URL || 'http://localhost:3848';
 
 export interface AiAnalyzePage {
   title?: string;
@@ -32,17 +31,13 @@ export interface AiAnalyzeResponse {
   };
 }
 
-function aiBase(aiServerUrl: string = DEFAULT_AI_SERVER): string {
-  return aiServerUrl.replace(/\/$/, '');
-}
-
 export async function requestAiAnalyze(
   payload: AiAnalyzeRequest,
-  aiServerUrl: string = DEFAULT_AI_SERVER,
 ): Promise<AiAnalyzeResponse> {
-  const res = await fetch(`${aiBase(aiServerUrl)}/api/ai-analyze`, {
+  const base = getAthensApiUrl();
+  const res = await fetch(`${base}/api/oak/ai-analyze`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify(payload),
   });
 
@@ -58,10 +53,11 @@ export async function requestAiAnalyze(
   return data;
 }
 
-export async function fetchRuntimeFile(
-  aiServerUrl: string = DEFAULT_AI_SERVER,
-): Promise<RuntimeAttachedFile | null> {
-  const res = await fetch(`${aiBase(aiServerUrl)}/api/runtime-file`);
+export async function fetchRuntimeFile(): Promise<RuntimeAttachedFile | null> {
+  const base = getAthensApiUrl();
+  const res = await fetch(`${base}/api/oak/runtime-file`, {
+    headers: authHeaders(),
+  });
   const data = (await res.json().catch(() => ({}))) as {
     file?: RuntimeAttachedFile;
     error?: string;

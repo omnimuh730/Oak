@@ -197,3 +197,21 @@
   padding: 8px 16px;
   cursor: pointer;
 }
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-signed-in {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-user {
+  margin: 0;
+  font-size: 13px;
+  color: #e8eaef;
+}

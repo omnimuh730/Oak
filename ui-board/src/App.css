@@ -296,3 +296,49 @@
   color: var(--text);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
+
+.auth-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-box input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 13px;
+  width: 120px;
+}
+
+.auth-box button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.auth-box button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-box.signed-in .auth-user {
+  font-size: 13px;
+  color: var(--text);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-box.signed-in button {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DEFAULT_SERVER, MSG, type DomNode, type DomTreePayload } from '../types';
+import {
+  DEFAULT_ATHENS_API_URL,
+  getAthensApiUrl,
+  getOakSession,
+  setAthensApiUrl,
+  type OakStoredSession,
+} from '../auth/oak-auth';
+import { MSG, type DomNode, type DomTreePayload } from '../types';
 import './SidebarApp.css';
 
 function sendMessage<T>(message: unknown): Promise<T> {
@@ -19,21 +26,26 @@ function sendMessage<T>(message: unknown): Promise<T> {
 }
 
 export default function SidebarApp() {
-  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
+  const [apiUrl, setApiUrl] = useState(DEFAULT_ATHENS_API_URL);
+  const [session, setSession] = useState<OakStoredSession | null>(null);
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [lastFetch, setLastFetch] = useState<DomTreePayload | null>(null);
 
   useEffect(() => {
-    chrome.storage.local.get(['serverUrl'], (result) => {
-      if (result.serverUrl) setServerUrl(String(result.serverUrl));
-    });
+    void (async () => {
+      setApiUrl(await getAthensApiUrl());
+      setSession(await getOakSession());
+    })();
   }, []);
 
   useEffect(() => {
-    chrome.storage.local.set({ serverUrl });
-  }, [serverUrl]);
+    void setAthensApiUrl(apiUrl);
+  }, [apiUrl]);
 
   useEffect(() => {
     let alive = true;
@@ -53,7 +65,52 @@ export default function SidebarApp() {
       alive = false;
       clearInterval(id);
     };
-  }, [serverUrl]);
+  }, [session, apiUrl]);
+
+  const handleSignIn = async () => {
+    setAuthBusy(true);
+    setStatus('Signing in…');
+    try {
+      const res = await sendMessage<{
+        ok?: boolean;
+        error?: string;
+        session?: OakStoredSession;
+      }>({
+        type: MSG.AUTH_SIGNIN,
+        name: name.trim(),
+        password,
+        apiUrl,
+      });
+      if (!res?.ok || !res.session) {
+        throw new Error(res?.error || 'Sign in failed');
+      }
+      setSession(res.session);
+      setPassword('');
+      setStatus(`Signed in as ${res.session.displayName}`);
+    } catch (err) {
+      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthBusy(true);
+    try {
+      const res = await sendMessage<{ ok?: boolean; error?: string }>({
+        type: MSG.AUTH_SIGNOUT,
+      });
+      if (!res?.ok) {
+        throw new Error(res?.error || 'Sign out failed');
+      }
+      setSession(null);
+      setStatus('Signed out');
+    } catch (err) {
+      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
 
   const fetchDom = useCallback(async () => {
     setFetching(true);
@@ -90,7 +147,78 @@ export default function SidebarApp() {
     <div className="sidebar-app">
       <section className="welcome">
         <h2>Welcome</h2>
-        <p className="hint">Capture the current page DOM and visualize it on the Oak UI Board.</p>
+        <p className="hint">
+          Sign in with your Athens account, then capture the page DOM for the Oak UI Board.
+        </p>
+      </section>
+
+      <section className="connection">
+        <h3>Athens account</h3>
+        {session ? (
+          <div className="auth-signed-in">
+            <p className="auth-user">
+              Signed in as <strong>{session.displayName}</strong>
+            </p>
+            <button
+              type="button"
+              className="tool-card"
+              onClick={() => void handleSignOut()}
+              disabled={authBusy}
+            >
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <div className="auth-form">
+            <label className="field">
+              <span>Username</span>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="username"
+                placeholder="Athens username"
+              />
+            </label>
+            <label className="field">
+              <span>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                placeholder="Athens password"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSignIn();
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="tool-card primary"
+              onClick={() => void handleSignIn()}
+              disabled={authBusy || !name.trim() || !password}
+            >
+              {authBusy ? 'Signing in…' : 'Sign in'}
+            </button>
+          </div>
+        )}
+
+        <label className="field" style={{ marginTop: 12 }}>
+          <span>Athens API URL</span>
+          <input
+            value={apiUrl}
+            onChange={(e) => setApiUrl(e.target.value)}
+            placeholder="http://127.0.0.1:8980"
+          />
+        </label>
+        <div className={`conn-status ${connected ? 'on' : 'off'}`}>
+          <span className="dot" />
+          {connected
+            ? 'Socket connected'
+            : session
+              ? 'Socket offline'
+              : 'Sign in to connect'}
+        </div>
       </section>
 
       <section className="tools">
@@ -100,39 +228,11 @@ export default function SidebarApp() {
             type="button"
             className="tool-card primary"
             onClick={fetchDom}
-            disabled={fetching || !connected}
+            disabled={fetching || !connected || !session}
           >
             <span className="tool-icon">⬡</span>
             <span className="tool-label">{fetching ? 'Fetching…' : 'Fetch DOM'}</span>
           </button>
-          <button type="button" className="tool-card" disabled>
-            <span className="tool-icon">✎</span>
-            <span className="tool-label">Write</span>
-          </button>
-          <button type="button" className="tool-card" disabled>
-            <span className="tool-icon">🌐</span>
-            <span className="tool-label">Translate</span>
-          </button>
-          <button type="button" className="tool-card" disabled>
-            <span className="tool-icon">🔍</span>
-            <span className="tool-label">Search</span>
-          </button>
-        </div>
-      </section>
-
-      <section className="connection">
-        <h3>Connection</h3>
-        <label className="field">
-          <span>Backend URL</span>
-          <input
-            value={serverUrl}
-            onChange={(e) => setServerUrl(e.target.value)}
-            placeholder="http://localhost:3847"
-          />
-        </label>
-        <div className={`conn-status ${connected ? 'on' : 'off'}`}>
-          <span className="dot" />
-          {connected ? 'Backend connected' : 'Backend offline'}
         </div>
       </section>
 
@@ -160,8 +260,6 @@ export default function SidebarApp() {
   );
 }
 
-// Find the MiniNode function at the bottom and replace it with this:
-
 function MiniNode({ node, depth }: { node: DomNode; depth: number }) {
   if (depth > 2 || !node) return null;
 
@@ -178,20 +276,18 @@ function MiniNode({ node, depth }: { node: DomNode; depth: number }) {
       ))}
       {children.length > 3 && (
         <div className="mini-node" style={{ paddingLeft: (depth + 1) * 12 }}>
-          <span className="mini-more">+{children.length - 3} more</span>
+          …
         </div>
       )}
     </div>
   );
 }
 
-function isValidTree(node: unknown): node is DomNode {
-  if (!node || typeof node !== 'object') return false;
-  const n = node as DomNode;
-  return typeof n.tag === 'string' && Array.isArray(n.children);
+function isValidTree(tree: unknown): tree is DomNode {
+  return Boolean(tree && typeof tree === 'object' && 'tag' in (tree as object));
 }
 
 function countNodes(node: DomNode | undefined): number {
-  if (!node || !Array.isArray(node.children)) return 0;
-  return 1 + node.children.reduce((s, c) => s + countNodes(c), 0);
+  if (!node) return 0;
+  return 1 + (node.children ?? []).reduce((sum, child) => sum + countNodes(child), 0);
 }

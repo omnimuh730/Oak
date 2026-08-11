@@ -1,11 +1,18 @@
 import { io, Socket } from 'socket.io-client';
 import type { PipelineProgress } from '../../shared/pipeline-types';
+import {
+  authHeaders,
+  getAccessToken,
+  getAthensApiUrl,
+  getOakSession,
+  oakSignIn,
+  oakSignOut,
+  OAK_SOCKET_PATH,
+} from './auth/oak-auth';
 import { runFabPipeline } from './pipeline/run-pipeline';
 import { addPipelineUsage } from './pipeline/usage-tracker';
 import { sendPlanStepToTab } from './tab-messaging';
 import {
-  DEFAULT_AI_SERVER,
-  DEFAULT_SERVER,
   MSG,
   type DomTreePayload,
   type ExecuteActionsPayload,
@@ -47,9 +54,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-function connectSocket(serverUrl: string) {
+async function connectSocket() {
   socket?.disconnect();
+  socket = null;
+  socketConnected = false;
+
+  const token = await getAccessToken();
+  if (!token) return;
+
+  const serverUrl = await getAthensApiUrl();
   socket = io(serverUrl, {
+    path: OAK_SOCKET_PATH,
+    auth: { token },
     query: { type: 'extension', name: 'Oak Extension' },
     transports: ['websocket', 'polling'],
   });
@@ -59,6 +75,11 @@ function connectSocket(serverUrl: string) {
   });
 
   socket.on('disconnect', () => {
+    socketConnected = false;
+  });
+
+  socket.on('connect_error', (err) => {
+    console.warn('[Oak] socket connect_error:', err.message);
     socketConnected = false;
   });
 
@@ -131,13 +152,11 @@ function connectSocket(serverUrl: string) {
   });
 }
 
-chrome.storage.local.get(['serverUrl'], (result) => {
-  connectSocket(result.serverUrl || DEFAULT_SERVER);
-});
+void connectSocket();
 
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.serverUrl?.newValue) {
-    connectSocket(changes.serverUrl.newValue as string);
+  if (changes.athensApiUrl || changes.oakSession) {
+    void connectSocket();
   }
 });
 
@@ -153,6 +172,58 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.SOCKET_STATUS) {
     sendResponse({ connected: socketConnected });
+    return true;
+  }
+
+  if (message.type === MSG.AUTH_STATUS) {
+    void getOakSession().then((session) => {
+      sendResponse({
+        signedIn: Boolean(session),
+        session,
+        connected: socketConnected,
+      });
+    });
+    return true;
+  }
+
+  if (message.type === MSG.AUTH_SIGNIN) {
+    void (async () => {
+      try {
+        const session = await oakSignIn(
+          String(message.name || ''),
+          String(message.password || ''),
+          typeof message.apiUrl === 'string' ? message.apiUrl : undefined,
+        );
+        await connectSocket();
+        sendResponse({ ok: true, session });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === MSG.AUTH_SIGNOUT) {
+    void (async () => {
+      try {
+        await oakSignOut();
+        await connectSocket();
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === 'oak:reconnect-socket') {
+    void connectSocket().then(() => sendResponse({ ok: true }));
     return true;
   }
 
@@ -172,14 +243,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     void (async () => {
       try {
-        const stored = await chrome.storage.local.get(['aiServerUrl']);
-        const aiServerUrl =
-          (stored.aiServerUrl as string | undefined) || DEFAULT_AI_SERVER;
+        const token = await getAccessToken();
+        if (!token) {
+          await broadcastPipelineProgress(tabId, {
+            phase: 'error',
+            message: 'Sign in required',
+            error: 'Sign in to Athens in the Oak sidebar first',
+          });
+          return;
+        }
 
+        const apiUrl = await getAthensApiUrl();
         await runFabPipeline({
           tabId,
           preferredFrameId: sender.frameId ?? null,
-          aiServerUrl,
+          aiServerUrl: apiUrl,
           emitDomTree: (payload) => {
             socket?.emit('dom:tree', payload);
           },
@@ -204,12 +282,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === MSG.MATCH_OPTION) {
     const body = message.payload as MatchOptionRequest;
-    const base = (message.aiServerUrl as string | undefined) || DEFAULT_AI_SERVER;
     (async () => {
       try {
-        const res = await fetch(`${base.replace(/\/$/, '')}/api/match-option`, {
+        const base = await getAthensApiUrl();
+        const res = await fetch(`${base}/api/oak/match-option`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await authHeaders(),
           body: JSON.stringify(body),
         });
         const data = (await res.json().catch(() => ({}))) as MatchOptionResponse;

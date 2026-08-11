@@ -15,6 +15,22 @@ function mountTarget(): HTMLElement | null {
   return document.body;
 }
 
+function sendRuntime<T>(message: unknown): Promise<T> {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response as T);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 function mountOakUI(): void {
   if (!shouldShowUI() || document.getElementById(HOST_ID)) return;
 
@@ -34,18 +50,62 @@ function mountOakUI(): void {
   style.textContent = STYLES;
   shadow.appendChild(style);
 
+  const iconUrl = chrome.runtime.getURL('public/icon-48.png');
+
   const fab = document.createElement('button');
   fab.className = 'oak-fab';
   fab.title = 'Run Oak: Fetch → Analyze → Fill';
   fab.type = 'button';
-  const iconUrl = chrome.runtime.getURL('public/icon-48.png');
   fab.innerHTML = `
     <img class="oak-fab-icon" src="${iconUrl}" alt="Oak" width="28" height="28" />
     <span class="oak-fab-status" hidden></span>
   `;
   shadow.appendChild(fab);
 
-  // Sidebar kept for toolbar toggle / debug; FAB no longer opens it.
+  const accountBtn = document.createElement('button');
+  accountBtn.className = 'oak-account-btn';
+  accountBtn.type = 'button';
+  accountBtn.title = 'Account';
+  accountBtn.hidden = true;
+  accountBtn.textContent = 'Account';
+  shadow.appendChild(accountBtn);
+
+  const modal = document.createElement('div');
+  modal.className = 'oak-signin';
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="oak-signin-card" role="dialog" aria-label="Athens account">
+      <div class="oak-signin-header">
+        <img src="${iconUrl}" alt="" width="28" height="28" />
+        <div>
+          <strong class="oak-modal-title">Sign in to Athens</strong>
+          <p class="oak-modal-subtitle">Use your Athens account to run Oak</p>
+        </div>
+        <button type="button" class="oak-signin-close" aria-label="Close">✕</button>
+      </div>
+      <div class="oak-signin-form">
+        <label class="oak-field">
+          <span>Username</span>
+          <input class="oak-signin-name" autocomplete="username" placeholder="Athens username" />
+        </label>
+        <label class="oak-field">
+          <span>Password</span>
+          <input class="oak-signin-password" type="password" autocomplete="current-password" placeholder="Password" />
+        </label>
+      </div>
+      <div class="oak-account-panel" hidden>
+        <p class="oak-account-name"></p>
+        <p class="oak-account-hint">Signed in with your Athens account</p>
+      </div>
+      <p class="oak-signin-error" hidden></p>
+      <div class="oak-signin-actions">
+        <button type="button" class="oak-signin-submit">Sign in</button>
+        <button type="button" class="oak-signout-btn" hidden>Sign out</button>
+      </div>
+    </div>
+  `;
+  shadow.appendChild(modal);
+
   const sidebar = document.createElement('div');
   sidebar.className = 'oak-sidebar';
   sidebar.innerHTML = `
@@ -60,13 +120,76 @@ function mountOakUI(): void {
   const closeBtn = sidebar.querySelector('.oak-close') as HTMLButtonElement;
   const statusEl = fab.querySelector('.oak-fab-status') as HTMLSpanElement;
   const iconEl = fab.querySelector('.oak-fab-icon') as HTMLImageElement;
+  const nameInput = modal.querySelector('.oak-signin-name') as HTMLInputElement;
+  const passwordInput = modal.querySelector('.oak-signin-password') as HTMLInputElement;
+  const errorEl = modal.querySelector('.oak-signin-error') as HTMLParagraphElement;
+  const submitBtn = modal.querySelector('.oak-signin-submit') as HTMLButtonElement;
+  const signOutBtn = modal.querySelector('.oak-signout-btn') as HTMLButtonElement;
+  const modalCloseBtn = modal.querySelector('.oak-signin-close') as HTMLButtonElement;
+  const modalTitle = modal.querySelector('.oak-modal-title') as HTMLElement;
+  const modalSubtitle = modal.querySelector('.oak-modal-subtitle') as HTMLElement;
+  const signInForm = modal.querySelector('.oak-signin-form') as HTMLElement;
+  const accountPanel = modal.querySelector('.oak-account-panel') as HTMLElement;
+  const accountNameEl = modal.querySelector('.oak-account-name') as HTMLElement;
 
   let open = false;
   let pipelineBusy = false;
+  let signedIn = false;
+  let displayName = '';
+  let startAfterSignIn = false;
 
   function setOpen(value: boolean) {
     open = value;
     sidebar.classList.toggle('open', open);
+  }
+
+  function setModalMode(mode: 'signin' | 'account') {
+    const isAccount = mode === 'account';
+    signInForm.hidden = isAccount;
+    accountPanel.hidden = !isAccount;
+    submitBtn.hidden = isAccount;
+    signOutBtn.hidden = !isAccount;
+    modalTitle.textContent = isAccount ? 'Athens account' : 'Sign in to Athens';
+    modalSubtitle.textContent = isAccount
+      ? 'Manage your Oak session'
+      : 'Use your Athens account to run Oak';
+    accountNameEl.textContent = displayName || 'Signed in';
+  }
+
+  function setSignInOpen(value: boolean) {
+    modal.hidden = !value;
+    if (value) {
+      errorEl.hidden = true;
+      errorEl.textContent = '';
+      passwordInput.value = '';
+      setModalMode(signedIn ? 'account' : 'signin');
+      if (!signedIn) queueMicrotask(() => nameInput.focus());
+    }
+  }
+
+  function refreshAuthBadge() {
+    fab.classList.toggle('needs-auth', !signedIn);
+    accountBtn.hidden = !signedIn || pipelineBusy;
+    fab.title = signedIn
+      ? 'Run Oak: Fetch → Analyze → Fill'
+      : 'Sign in to Athens to run Oak';
+  }
+
+  async function refreshAuthStatus() {
+    try {
+      const res = await sendRuntime<{
+        signedIn?: boolean;
+        session?: { displayName?: string; username?: string };
+      }>({ type: MSG.AUTH_STATUS });
+      signedIn = Boolean(res?.signedIn);
+      displayName =
+        res?.session?.displayName || res?.session?.username || '';
+    } catch {
+      signedIn = false;
+      displayName = '';
+    }
+    refreshAuthBadge();
+    if (!modal.hidden) setModalMode(signedIn ? 'account' : 'signin');
   }
 
   function applyProgress(progress: PipelineProgress) {
@@ -81,18 +204,23 @@ function mountOakUI(): void {
     fab.classList.toggle('error', progress.phase === 'error');
     fab.classList.toggle('expanded', progress.phase !== 'idle');
     fab.disabled = busy;
+    accountBtn.hidden = !signedIn || busy;
 
     if (progress.phase === 'idle') {
       statusEl.hidden = true;
       statusEl.textContent = '';
       iconEl.hidden = false;
-      fab.title = 'Run Oak: Fetch → Analyze → Fill';
+      refreshAuthBadge();
       return;
     }
 
     statusEl.hidden = false;
     iconEl.hidden = false;
-    statusEl.textContent = progress.message;
+    const visible =
+      progress.phase === 'error' && progress.error
+        ? truncateStatus(`${progress.message}: ${progress.error}`, 72)
+        : progress.message;
+    statusEl.textContent = visible;
 
     const detailParts = [
       progress.stepLabel ? `Step: ${progress.stepLabel}` : null,
@@ -105,8 +233,12 @@ function mountOakUI(): void {
     fab.title = detailParts.length ? detailParts.join('\n') : progress.message;
   }
 
-  fab.addEventListener('click', () => {
-    if (pipelineBusy) return;
+  function truncateStatus(text: string, max: number): string {
+    const cleaned = text.replace(/\s+/g, ' ').trim();
+    return cleaned.length > max ? `${cleaned.slice(0, max - 1)}…` : cleaned;
+  }
+
+  function startPipeline() {
     applyProgress({ phase: 'fetching', message: 'Starting…' });
     chrome.runtime.sendMessage({ type: MSG.START_PIPELINE }, (res) => {
       if (chrome.runtime.lastError) {
@@ -118,13 +250,122 @@ function mountOakUI(): void {
         return;
       }
       if (res?.error) {
+        const err = String(res.error);
+        if (/sign in/i.test(err)) {
+          signedIn = false;
+          refreshAuthBadge();
+          startAfterSignIn = true;
+          setSignInOpen(true);
+          applyProgress({ phase: 'idle', message: 'Idle' });
+          return;
+        }
         applyProgress({
           phase: 'error',
           message: 'Failed to start',
-          error: String(res.error),
+          error: err,
         });
       }
     });
+  }
+
+  async function submitSignIn() {
+    const name = nameInput.value.trim();
+    const password = passwordInput.value;
+    if (!name || !password) {
+      errorEl.hidden = false;
+      errorEl.textContent = 'Enter username and password';
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Signing in…';
+    errorEl.hidden = true;
+
+    try {
+      const res = await sendRuntime<{ ok?: boolean; error?: string }>({
+        type: MSG.AUTH_SIGNIN,
+        name,
+        password,
+      });
+      if (!res?.ok) {
+        throw new Error(res?.error || 'Sign in failed');
+      }
+      signedIn = true;
+      refreshAuthBadge();
+      setSignInOpen(false);
+      if (startAfterSignIn) {
+        startAfterSignIn = false;
+        startPipeline();
+      }
+    } catch (err) {
+      errorEl.hidden = false;
+      errorEl.textContent = err instanceof Error ? err.message : String(err);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Sign in';
+    }
+  }
+
+  async function submitSignOut() {
+    signOutBtn.disabled = true;
+    signOutBtn.textContent = 'Signing out…';
+    errorEl.hidden = true;
+    try {
+      const res = await sendRuntime<{ ok?: boolean; error?: string }>({
+        type: MSG.AUTH_SIGNOUT,
+      });
+      if (!res?.ok) throw new Error(res?.error || 'Sign out failed');
+      signedIn = false;
+      displayName = '';
+      startAfterSignIn = false;
+      refreshAuthBadge();
+      setSignInOpen(false);
+    } catch (err) {
+      errorEl.hidden = false;
+      errorEl.textContent = err instanceof Error ? err.message : String(err);
+    } finally {
+      signOutBtn.disabled = false;
+      signOutBtn.textContent = 'Sign out';
+    }
+  }
+
+  fab.addEventListener('click', () => {
+    if (pipelineBusy) return;
+    if (!signedIn) {
+      startAfterSignIn = true;
+      setSignInOpen(true);
+      return;
+    }
+    startPipeline();
+  });
+
+  accountBtn.addEventListener('click', () => {
+    if (pipelineBusy) return;
+    startAfterSignIn = false;
+    setSignInOpen(true);
+  });
+
+  submitBtn.addEventListener('click', () => {
+    void submitSignIn();
+  });
+  signOutBtn.addEventListener('click', () => {
+    void submitSignOut();
+  });
+  passwordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void submitSignIn();
+  });
+  nameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') passwordInput.focus();
+  });
+  modalCloseBtn.addEventListener('click', () => {
+    startAfterSignIn = false;
+    setSignInOpen(false);
+  });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      startAfterSignIn = false;
+      setSignInOpen(false);
+    }
   });
 
   closeBtn.addEventListener('click', () => setOpen(false));
@@ -141,7 +382,16 @@ function mountOakUI(): void {
     if (message.type === MSG.PIPELINE_PROGRESS && message.progress) {
       applyProgress(message.progress as PipelineProgress);
     }
+    if (message.type === MSG.AUTH_STATUS || message.type === 'oak:reconnect-socket') {
+      void refreshAuthStatus();
+    }
   });
+
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.oakSession) void refreshAuthStatus();
+  });
+
+  void refreshAuthStatus();
 }
 
 function ensureOakUI(): void {
@@ -170,6 +420,27 @@ export function injectOakUI(): void {
 
 const STYLES = `
   :host, * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  .oak-account-btn {
+    position: fixed;
+    bottom: 96px;
+    left: 24px;
+    pointer-events: auto;
+    z-index: 2147483647;
+    border: 1px solid rgba(120, 180, 140, 0.35);
+    background: #142018;
+    color: #eef7f1;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  }
+
+  .oak-account-btn:hover {
+    background: #1a2a20;
+  }
 
   .oak-fab {
     position: fixed;
@@ -205,6 +476,10 @@ const STYLES = `
 
   .oak-fab.expanded {
     padding-right: 16px;
+  }
+
+  .oak-fab.needs-auth {
+    box-shadow: 0 4px 20px rgba(31, 77, 54, 0.35), 0 0 0 2px rgba(250, 204, 21, 0.55);
   }
 
   .oak-fab.busy {
@@ -246,6 +521,140 @@ const STYLES = `
   @keyframes oak-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.72; transform: scale(0.94); }
+  }
+
+  .oak-signin {
+    position: fixed;
+    inset: 0;
+    pointer-events: auto;
+    z-index: 2147483647;
+    background: rgba(8, 12, 10, 0.28);
+  }
+
+  .oak-signin-card {
+    position: fixed;
+    bottom: 100px;
+    left: 24px;
+    width: min(320px, calc(100vw - 48px));
+    padding: 14px;
+    border-radius: 16px;
+    background: #142018;
+    color: #eef7f1;
+    border: 1px solid rgba(120, 180, 140, 0.28);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .oak-signin-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .oak-signin-header img {
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  .oak-signin-header strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .oak-signin-header p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: #9eb5a6;
+  }
+
+  .oak-signin-close {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: #9eb5a6;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+
+  .oak-signin-close:hover {
+    background: rgba(255,255,255,0.06);
+    color: #eef7f1;
+  }
+
+  .oak-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #9eb5a6;
+  }
+
+  .oak-field input {
+    border: 1px solid rgba(120, 180, 140, 0.28);
+    background: #0d1510;
+    color: #eef7f1;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .oak-field input:focus {
+    border-color: rgba(120, 180, 140, 0.7);
+  }
+
+  .oak-signin-error {
+    margin: 0;
+    font-size: 12px;
+    color: #fca5a5;
+  }
+
+  .oak-signin-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .oak-signin-submit,
+  .oak-signout-btn {
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    color: #f3faf5;
+    background: linear-gradient(135deg, #2f6f4e, #1f4d36);
+  }
+
+  .oak-signout-btn {
+    background: #3a2222;
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    color: #fecaca;
+  }
+
+  .oak-signin-submit:disabled,
+  .oak-signout-btn:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  .oak-account-name {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 650;
+    color: #eef7f1;
+  }
+
+  .oak-account-hint {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: #9eb5a6;
   }
 
   .oak-sidebar {

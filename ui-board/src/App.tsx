@@ -4,6 +4,17 @@ import type { ActionStep } from './automation-types';
 import type { ClientInfo, DomNode, DomTreeMessage, HighlightPayload } from './types';
 import { fetchRuntimeFile, requestAiAnalyze } from './ai-client';
 import {
+  DEFAULT_ATHENS_API_URL,
+  getAccessToken,
+  getAthensApiUrl,
+  getOakSession,
+  oakSignIn,
+  oakSignOut,
+  OAK_SOCKET_PATH,
+  setAthensApiUrl,
+  type OakStoredSession,
+} from './auth/oak-auth';
+import {
   formatMetaTreePreview,
   formatPureTreePreview,
   splitDomTree,
@@ -22,10 +33,12 @@ import type {
 } from './plan-runner/types';
 import './App.css';
 
-const DEFAULT_SERVER = 'http://localhost:3847';
-
 export default function App() {
-  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
+  const [serverUrl, setServerUrl] = useState(() => getAthensApiUrl());
+  const [session, setSession] = useState<OakStoredSession | null>(() => getOakSession());
+  const [authName, setAuthName] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [latestTree, setLatestTree] = useState<DomTreeMessage | null>(null);
@@ -47,7 +60,18 @@ export default function App() {
   const pauseResolverRef = useRef<((decision: PauseDecision) => void) | null>(null);
 
   useEffect(() => {
+    setAthensApiUrl(serverUrl);
+    const token = getAccessToken();
+    if (!token || !session) {
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+      setConnected(false);
+      return;
+    }
+
     const socket = io(serverUrl, {
+      path: OAK_SOCKET_PATH,
+      auth: { token },
       query: { type: 'ui-board', name: 'Oak UI Board' },
       transports: ['websocket', 'polling'],
     });
@@ -55,6 +79,7 @@ export default function App() {
 
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
+    socket.on('connect_error', () => setConnected(false));
     socket.on('clients:update', (list: ClientInfo[]) => setClients(list));
     socket.on('connected', (data: { clients: ClientInfo[] }) => setClients(data.clients));
     socket.on('dom:tree', (payload: DomTreeMessage) => {
@@ -66,11 +91,38 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [serverUrl]);
+  }, [serverUrl, session]);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleSignIn = async () => {
+    setAuthBusy(true);
+    try {
+      const next = await oakSignIn(authName.trim(), authPassword, serverUrl);
+      setSession(next);
+      setAuthPassword('');
+      showToast(`Signed in as ${next.displayName}`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setAuthBusy(true);
+    try {
+      await oakSignOut();
+      setSession(null);
+      showToast('Signed out');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAuthBusy(false);
+    }
   };
 
   const getTarget = useCallback(
@@ -204,6 +256,10 @@ export default function App() {
 
   const handleAiAnalyze = async () => {
     if (!latestTree || !splitTrees || aiAnalyzeRunning) return;
+    if (!session) {
+      showToast('Sign in to Athens first');
+      return;
+    }
 
     setAiAnalyzeRunning(true);
     try {
@@ -320,17 +376,51 @@ export default function App() {
         </div>
         <div className="header-right">
           <div className="server-input">
-            <label htmlFor="server">Server</label>
+            <label htmlFor="server">Athens API</label>
             <input
               id="server"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="http://localhost:3847"
+              placeholder={DEFAULT_ATHENS_API_URL}
             />
           </div>
+          {session ? (
+            <div className="auth-box signed-in">
+              <span className="auth-user">{session.displayName}</span>
+              <button type="button" onClick={() => void handleSignOut()} disabled={authBusy}>
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <div className="auth-box">
+              <input
+                value={authName}
+                onChange={(e) => setAuthName(e.target.value)}
+                placeholder="Username"
+                autoComplete="username"
+              />
+              <input
+                type="password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                placeholder="Password"
+                autoComplete="current-password"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSignIn();
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void handleSignIn()}
+                disabled={authBusy || !authName.trim() || !authPassword}
+              >
+                {authBusy ? '…' : 'Sign in'}
+              </button>
+            </div>
+          )}
           <div className={`status ${connected ? 'online' : 'offline'}`}>
             <span className="dot" />
-            {connected ? 'Connected' : 'Disconnected'}
+            {connected ? 'Connected' : session ? 'Disconnected' : 'Sign in'}
           </div>
         </div>
       </header>
@@ -370,7 +460,7 @@ export default function App() {
               <button
                 type="button"
                 className="primary"
-                disabled={!splitTrees || aiAnalyzeRunning || planRunRunning}
+                disabled={!session || !splitTrees || aiAnalyzeRunning || planRunRunning}
                 onClick={handleAiAnalyze}
               >
                 {aiAnalyzeRunning ? 'Analyzing...' : 'AI Analyze'}

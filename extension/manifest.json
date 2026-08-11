@@ -6,8 +6,8 @@
   "permissions": ["activeTab", "storage", "scripting", "alarms", "webNavigation"],
   "host_permissions": [
     "<all_urls>",
-    "http://localhost:3847/*",
-    "http://localhost:3848/*",
+    "http://127.0.0.1:8980/*",
+    "http://localhost:8980/*",
     "http://localhost:5173/*"
   ],
   "background": {

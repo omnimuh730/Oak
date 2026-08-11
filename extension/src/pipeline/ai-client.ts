@@ -1,6 +1,9 @@
 import type { AiUsageSummary } from '../../../shared/ai-usage';
 import type { ActionPlan, RuntimeAttachedFile } from '../../../shared/plan-runner/types';
-import { DEFAULT_AI_SERVER } from '../types';
+import {
+  authHeaders,
+  getAthensApiUrl,
+} from '../auth/oak-auth';
 
 export interface AiAnalyzePage {
   title?: string;
@@ -23,36 +26,59 @@ export interface AiAnalyzeResponse {
   usage?: AiUsageSummary;
 }
 
-function aiBase(aiServerUrl: string = DEFAULT_AI_SERVER): string {
-  return aiServerUrl.replace(/\/$/, '');
-}
-
 export async function requestAiAnalyze(
   payload: AiAnalyzeRequest,
-  aiServerUrl: string = DEFAULT_AI_SERVER,
+  _apiUrl?: string,
 ): Promise<AiAnalyzeResponse> {
-  const res = await fetch(`${aiBase(aiServerUrl)}/api/ai-analyze`, {
+  const base = (_apiUrl || (await getAthensApiUrl())).replace(/\/$/, '');
+  const res = await fetch(`${base}/api/oak/ai-analyze`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await authHeaders(),
     body: JSON.stringify(payload),
   });
 
-  const data = (await res.json().catch(() => ({}))) as AiAnalyzeResponse;
+  const data = (await res.json().catch(() => ({}))) as AiAnalyzeResponse & {
+    message?: string;
+    success?: boolean;
+  };
   if (!res.ok) {
-    throw new Error(
-      typeof data.error === 'string' ? data.error : `AI analyze failed: ${res.status}`,
-    );
+    throw new Error(extractError(data, `AI analyze failed: ${res.status}`));
   }
   if (!data.plan) {
-    throw new Error(data.error || 'AI backend returned no plan');
+    throw new Error(extractError(data, 'AI backend returned no plan'));
   }
   return data;
 }
 
+function extractError(
+  data: { error?: unknown; message?: unknown },
+  fallback: string,
+): string {
+  const nested =
+    data.message && typeof data.message === 'object'
+      ? (data.message as { error?: unknown; message?: unknown })
+      : null;
+  for (const candidate of [
+    data.error,
+    nested?.error,
+    data.message,
+    nested?.message,
+  ]) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      const text = candidate.trim();
+      if (text !== 'Bad Request' && text !== 'Unauthorized') return text;
+    }
+  }
+  return fallback;
+}
+
 export async function fetchRuntimeFile(
-  aiServerUrl: string = DEFAULT_AI_SERVER,
+  _apiUrl?: string,
 ): Promise<RuntimeAttachedFile | null> {
-  const res = await fetch(`${aiBase(aiServerUrl)}/api/runtime-file`);
+  const base = (_apiUrl || (await getAthensApiUrl())).replace(/\/$/, '');
+  const res = await fetch(`${base}/api/oak/runtime-file`, {
+    headers: await authHeaders(),
+  });
   const data = (await res.json().catch(() => ({}))) as {
     file?: RuntimeAttachedFile;
     error?: string;

@@ -18,8 +18,10 @@ export interface DomTreePayload {
   frameId?: number;
 }
 
-export const DEFAULT_SERVER = 'http://localhost:3847';
-export const DEFAULT_AI_SERVER = 'http://localhost:3848';
+/** @deprecated use DEFAULT_ATHENS_API_URL from auth/oak-auth */
+export const DEFAULT_SERVER = 'http://127.0.0.1:8980';
+/** @deprecated same host as athens-backend */
+export const DEFAULT_AI_SERVER = 'http://127.0.0.1:8980';
 
 export const MSG = {
   TOGGLE_SIDEBAR: 'oak:toggle-sidebar',
@@ -36,6 +38,9 @@ export const MSG = {
   SIDEBAR_OPEN: 'oak:sidebar-open',
   SIDEBAR_CLOSE: 'oak:sidebar-close',
   SOCKET_STATUS: 'oak:socket-status',
+  AUTH_STATUS: 'oak:auth-status',
+  AUTH_SIGNIN: 'oak:auth-signin',
+  AUTH_SIGNOUT: 'oak:auth-signout',
 } as const;
 
 export interface MatchOptionRequest {

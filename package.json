@@ -2,10 +2,8 @@
   "name": "oak",
   "version": "1.0.0",
   "private": true,
-  "workspaces": ["backend", "ai-backend", "ui-board", "extension"],
+  "workspaces": ["ui-board", "extension"],
   "scripts": {
-    "dev:backend": "npm run dev -w backend",
-    "dev:ai-backend": "npm run dev -w ai-backend",
     "dev:ui-board": "npm run dev -w ui-board",
     "dev:extension": "npm run dev -w extension",
     "build": "npm run build -w extension && npm run build -w ui-board",
