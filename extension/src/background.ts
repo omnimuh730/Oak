@@ -279,22 +279,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true;
   }
-
-  if (message.type === MSG.DEBUG_LOG) {
-    const payload = message.payload;
-    if (payload && typeof payload === 'object') {
-      fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '4e43d4',
-        },
-        body: JSON.stringify(payload),
-      }).catch(() => {});
-    }
-    return false;
-  }
-
   if (message.type === MSG.MATCH_OPTION) {
     const body = message.payload as MatchOptionRequest;
     (async () => {

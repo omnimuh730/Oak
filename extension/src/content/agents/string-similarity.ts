@@ -1,5 +1,26 @@
 /** Minimum similarity (0–1) required to accept a non-exact combobox option match. */
-export const OPTION_SIMILARITY_THRESHOLD = 0.8;
+export const OPTION_SIMILARITY_THRESHOLD = 0.9;
+
+function tokensOf(text: string): string[] {
+  return normalize(text)
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/**
+ * True when `option` contains all tokens of `target` as a contiguous run but also
+ * has extra tokens (e.g. "Pacific University" ⊂ "Alaska Pacific University").
+ * Those are not safe local matches — keep typing / AI-match instead.
+ */
+export function isProperTokenExtension(target: string, option: string): boolean {
+  const want = tokensOf(target);
+  const have = tokensOf(option);
+  if (!want.length || have.length <= want.length) return false;
+  for (let i = 0; i <= have.length - want.length; i++) {
+    if (want.every((tok, j) => have[i + j] === tok)) return true;
+  }
+  return false;
+}
 
 function normalize(text: string): string {
   return text.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -99,7 +120,9 @@ export function bestSimilarityMatch<T>(
 ): { item: T; score: number } | null {
   let best: { item: T; score: number } | null = null;
   for (const item of candidates) {
-    const score = stringSimilarity(target, getText(item));
+    const text = getText(item);
+    if (isProperTokenExtension(target, text)) continue;
+    const score = stringSimilarity(target, text);
     if (score < threshold) continue;
     if (!best || score > best.score) best = { item, score };
   }

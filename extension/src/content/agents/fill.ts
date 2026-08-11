@@ -65,9 +65,6 @@ export async function fillElement(el: Element, value: string): Promise<string> {
   if (el instanceof HTMLSelectElement) {
     const enhanced = isEnhancedSelect(el);
     const combo = findAssociatedCombobox(el);
-    // #region agent log
-    fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'fill.ts:select',message:'Select fill routing',data:{selectId:el.id||null,optionCount:el.options.length,enhanced,hasCombo:Boolean(combo),comboTag:combo?.tagName||null,comboId:combo?.id||null,valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (enhanced && combo) {
       return selectComboboxOption(combo, value);
     }
@@ -83,9 +80,6 @@ export async function fillElement(el: Element, value: string): Promise<string> {
     }
     if (looksLikeCombobox(html)) {
       const target = resolveDropdownInteractionTarget(html);
-      // #region agent log
-      fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'fill.ts:comboboxInput',message:'Combobox input remapped',data:{fromTag:html.tagName,fromId:html.id||null,fromAriaHidden:html.getAttribute('aria-hidden'),toTag:target.tagName,toId:target.id||null,remapped:target!==html,valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       return selectComboboxOption(target, value);
     }
     await setNativeValue(el, value);
@@ -105,9 +99,6 @@ export async function fillElement(el: Element, value: string): Promise<string> {
 
   if (looksLikeCombobox(html)) {
     const target = resolveDropdownInteractionTarget(html);
-    // #region agent log
-    fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'fill.ts:comboboxEl',message:'Combobox element remapped',data:{fromTag:html.tagName,fromId:html.id||null,toTag:target.tagName,toId:target.id||null,remapped:target!==html,valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return selectComboboxOption(target, value);
   }
 

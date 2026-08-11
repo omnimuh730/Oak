@@ -1,6 +1,5 @@
-import { agentDebugLog } from '../debug-log';
 import { inferElementRole } from '../verify-element';
-import { findAssociatedCombobox, isEnhancedSelect } from './enhanced-select';
+import { findAssociatedCombobox } from './enhanced-select';
 import { selectComboboxOption } from './select-combobox';
 
 function normalize(text: string): string {
@@ -102,25 +101,6 @@ export async function selectRadioElement(
 
   const intended = value?.trim() || '';
 
-  // #region agent log
-  agentDebugLog({
-    runId: 'option-v1',
-    hypothesisId: 'J',
-    location: 'select-radio.ts:enter',
-    message: 'Choice control select',
-    data: {
-      tag: html.tagName,
-      type: el instanceof HTMLInputElement ? el.type : null,
-      role,
-      id: html.id || null,
-      ariaRole: html.getAttribute('role'),
-      valueLen: intended.length,
-      valuePreview: intended.slice(0, 60),
-      booleanIntent: intended ? isBooleanIntent(intended) : null,
-    },
-  });
-  // #endregion
-
   // Planner often targets role=option nodes for custom dropdowns — drive the parent combobox.
   const explicitAriaRole = (html.getAttribute('role') || '').toLowerCase();
   if (explicitAriaRole === 'option' || el instanceof HTMLOptionElement) {
@@ -130,21 +110,6 @@ export async function selectRadioElement(
       const select = el.closest('select');
       if (select instanceof HTMLSelectElement) {
         const combo = findAssociatedCombobox(select);
-        // #region agent log
-        agentDebugLog({
-          runId: 'option-v1',
-          hypothesisId: 'J',
-          location: 'select-radio.ts:optionNative',
-          message: 'Native option routed',
-          data: {
-            selectId: select.id || null,
-            enhanced: isEnhancedSelect(select),
-            hasCombo: Boolean(combo),
-            comboTag: combo?.tagName || null,
-            labelPreview: label.slice(0, 60),
-          },
-        });
-        // #endregion
         if (combo && label) return selectComboboxOption(combo, label);
         select.value = el.value;
         select.dispatchEvent(new Event('input', { bubbles: true }));
@@ -171,22 +136,6 @@ export async function selectRadioElement(
       (field.parentElement?.querySelector(
         '[role="combobox"]:not([aria-hidden="true"])',
       ) as HTMLElement | null);
-    // #region agent log
-    agentDebugLog({
-      runId: 'option-v1',
-      hypothesisId: 'J',
-      location: 'select-radio.ts:option',
-      message: 'Option routed to combobox',
-      data: {
-        optionId: html.id || null,
-        labelPreview: label.slice(0, 60),
-        hasCombo: Boolean(combo),
-        comboTag: combo?.tagName || null,
-        comboId: combo?.id || null,
-        viaSelect: Boolean(comboFromSelect),
-      },
-    });
-    // #endregion
     if (combo && label) return selectComboboxOption(combo, label);
     html.click();
     return optionLabel(html) || label;
@@ -205,9 +154,6 @@ export async function selectRadioElement(
     if (intended && !isBooleanIntent(intended)) {
       if (labelsMatch(el, intended)) return ensureChecked(el);
       const grouped = findChoiceInGroup(groupRoot(html), intended, 'checkbox');
-      // #region agent log
-      fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'checkbox-v1',hypothesisId:'I',location:'select-radio.ts:checkboxGroup',message:'Checkbox group label match',data:{intendedPreview:intended.slice(0,60),selfMatch:labelsMatch(el,intended),found:Boolean(grouped),foundId:grouped?.id||null,foundLabel:(grouped?optionLabel(grouped):null)?.slice(0,60)||null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (grouped) return ensureChecked(grouped);
       throw new Error(`No checkbox option matching "${intended}"`);
     }

@@ -6,7 +6,6 @@ import { selectRadioElement } from './agents/select-radio';
 import { uploadFileToElement } from './agents/upload';
 import { validateElementIndexes } from './agents/validate';
 import { waitMs } from './agents/wait';
-import { agentDebugLog } from './debug-log';
 import { highlightElement } from './highlighter';
 import { verifyElementByPlan } from './verify-element';
 
@@ -52,25 +51,6 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
   );
 
   if (!verified.ok || !verified.element) {
-    // #region agent log
-    agentDebugLog({
-      runId: 'form-frame-v2',
-      hypothesisId: 'E',
-      location: 'plan-step-runner.ts:verifyFail',
-      message: 'Element verify failed',
-      data: {
-        hostname: location.hostname,
-        isTop: window === window.top,
-        action: step.action,
-        element_index: step.element_index,
-        expected_label: step.expected_label,
-        expected_role: step.expected_role,
-        error: verified.error || null,
-        matchedLabel: verified.matchedLabel || null,
-        matchedRole: verified.matchedRole || null,
-      },
-    });
-    // #endregion
     return {
       ok: false,
       verified: false,
@@ -106,25 +86,6 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
       fileName: step.file?.name ?? null,
     });
     if (prior.matched) {
-      // #region agent log
-      agentDebugLog({
-        runId: 'option-v1',
-        hypothesisId: 'J',
-        location: 'plan-step-runner.ts:alreadyFilled',
-        message: 'Skipped already filled',
-        data: {
-          hostname: location.hostname,
-          isTop: window === window.top,
-          action: step.action,
-          element_index: step.element_index,
-          expected_role: step.expected_role,
-          valueAfterLen: (prior.current || '').length,
-          currentPreview: (prior.current || '').slice(0, 40),
-          elRole: (verified.element as HTMLElement).getAttribute?.('role') || null,
-          elTag: verified.element.tagName,
-        },
-      });
-      // #endregion
       return {
         ok: true,
         verified: true,
@@ -167,26 +128,6 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
     }
 
     const after = valueAfter ?? readControlValue(verified.element);
-    // #region agent log
-    agentDebugLog({
-      runId: 'option-v1',
-      hypothesisId: 'J',
-      location: 'plan-step-runner.ts:acted',
-      message: 'Plan step acted',
-      data: {
-        hostname: location.hostname,
-        isTop: window === window.top,
-        action: step.action,
-        element_index: step.element_index,
-        expected_role: step.expected_role,
-        matchedRole: verified.matchedRole,
-        valueAfterLen: (after || '').length,
-        valueAfterPreview: (after || '').slice(0, 40),
-        elRole: (verified.element as HTMLElement).getAttribute?.('role') || null,
-        elTag: verified.element.tagName,
-      },
-    });
-    // #endregion
     return {
       ok: true,
       verified: true,

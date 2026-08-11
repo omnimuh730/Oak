@@ -4,6 +4,7 @@ import { readControlValue } from './read-control-value';
 import {
   OPTION_SIMILARITY_THRESHOLD,
   bestSimilarityMatch,
+  isProperTokenExtension,
   stringSimilarity,
 } from './string-similarity';
 import { waitMs } from './wait';
@@ -186,16 +187,20 @@ function findLocalMatch(
   }
 
   if (target.length >= 4) {
+    // Allow country-code style "United States +1", or an option that starts with the
+    // intended value. Reject proper supersets like "Alaska Pacific University".
     const prefix = options.find((opt) => {
       const text = normalize(optionText(opt));
-      return text.startsWith(target) || text.includes(`${target} `) || text.includes(`${target}+`);
+      if (isProperTokenExtension(value, optionText(opt))) return false;
+      if (text.startsWith(target)) return true;
+      if (text.includes(`${target}+`) || text.startsWith(`${target} +`)) return true;
+      return false;
     });
     if (prefix) {
-      return {
-        match: prefix,
-        score: stringSimilarity(value, optionText(prefix)),
-        strategy: 'prefix',
-      };
+      const score = stringSimilarity(value, optionText(prefix));
+      if (score >= OPTION_SIMILARITY_THRESHOLD) {
+        return { match: prefix, score, strategy: 'prefix' };
+      }
     }
   }
 
@@ -320,12 +325,14 @@ async function matchFromCandidates(
     typedQuery,
   });
 
-  if (ai.matched_option) {
+  const aiConfidence =
+    typeof ai.confidence === 'number' ? ai.confidence : 0;
+  if (ai.matched_option && aiConfidence >= OPTION_SIMILARITY_THRESHOLD) {
     const el = resolveOptionElement(options, ai.matched_option);
-    if (el) {
+    if (el && !isProperTokenExtension(value, optionText(el))) {
       return {
         match: el,
-        score: typeof ai.confidence === 'number' ? ai.confidence : 1,
+        score: aiConfidence,
         strategy: 'ai',
       };
     }
@@ -364,10 +371,6 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
     );
     options = await waitForScopedOptions(html, doc);
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'select-combobox.ts:options',message:'Combobox options after open',data:{requestedTag:requested.tagName,requestedId:requested.id||null,tag:html.tagName,role:html.getAttribute('role'),id:html.id||null,remapped:html!==requested,optionCount:options.length,optionPreview:options.slice(0,8).map(optionText),valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   let { match, score } = await matchFromCandidates(options, value, fieldLabel, null);
 

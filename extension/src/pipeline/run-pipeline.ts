@@ -92,20 +92,12 @@ async function fetchDomFromTab(
     // restricted pages — fall back to main frame only
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'form-frame-v2',hypothesisId:'B',location:'run-pipeline.ts:fetchDom:frames',message:'Enumerating frames for form-score pick',data:{preferredFrameId,count:frameList.length,frames:frameList.slice(0,16).map((f)=>({id:f.frameId,url:(f.url||'').slice(0,120),parentId:f.parentFrameId}))},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
   if (preferredFrameId != null) {
     consider(await attempt(preferredFrameId), preferredFrameId);
   }
   for (const frame of frameList) {
     consider(await attempt(frame.frameId), frame.frameId);
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'form-frame-v2',hypothesisId:'B',location:'run-pipeline.ts:fetchDom:candidates',message:'Form-score candidates',data:{candidates:candidates.map((c)=>({frameId:c.frameId,formScore:c.formScore,url:(c.url||'').slice(0,140)}))},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (!candidates.length) {
     throw new Error(
@@ -146,9 +138,6 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     onProgress({ phase: 'fetching', message: 'Fetching DOM…' });
 
     const treePayload = await fetchDomFromTab(tabId, preferredFrameId);
-    // #region agent log
-    fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'form-frame-v2',hypothesisId:'B',location:'run-pipeline.ts:selectedTree',message:'Selected DOM frame for analyze',data:{tabId,preferredFrameId,selectedFrameId:treePayload.frameId??null,formScore:treePayload.formScore??null,url:(treePayload.url||'').slice(0,180),title:(treePayload.title||'').slice(0,80)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     emitDomTree?.(treePayload);
 
     const nodeCount = countDomNodes(treePayload.tree);

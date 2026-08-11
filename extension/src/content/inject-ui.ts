@@ -9,9 +9,6 @@ let persistObserver: MutationObserver | null = null;
 
 function shouldShowUI(): boolean {
   const show = shouldMountOakUi();
-  // #region agent log
-  fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'form-frame-v2',hypothesisId:'C',location:'inject-ui.ts:shouldShowUI',message:'FAB UI visibility gate',data:{hostname:location.hostname,isTop:window===window.top,show},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   return show;
 }
 
