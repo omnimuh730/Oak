@@ -1,5 +1,17 @@
 import { selectComboboxOption } from './select-combobox';
 
+/** Greenhouse/react-select search inputs often omit role=combobox on the <input>. */
+function looksLikeCombobox(el: HTMLElement): boolean {
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  if (role === 'combobox' || role === 'listbox') return true;
+  if (el.getAttribute('aria-haspopup') === 'listbox') return true;
+  if (el.getAttribute('aria-autocomplete') === 'list') return true;
+  if (el.hasAttribute('aria-expanded') && el.hasAttribute('aria-controls')) return true;
+  const cls = typeof el.className === 'string' ? el.className : '';
+  if (/\bselect__input\b/i.test(cls) || /\bSelect-input\b/.test(cls)) return true;
+  return false;
+}
+
 async function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, text: string): Promise<void> {
   const proto =
     el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -57,8 +69,7 @@ export async function fillElement(el: Element, value: string): Promise<string> {
       if (el.checked !== shouldCheck) el.click();
       return String(el.checked);
     }
-    const role = html.getAttribute('role');
-    if (role === 'combobox' || html.getAttribute('aria-haspopup') === 'listbox') {
+    if (looksLikeCombobox(html)) {
       return selectComboboxOption(el, value);
     }
     await setNativeValue(el, value);
@@ -76,8 +87,7 @@ export async function fillElement(el: Element, value: string): Promise<string> {
     return html.textContent || value;
   }
 
-  const role = html.getAttribute('role');
-  if (role === 'combobox' || html.getAttribute('aria-haspopup') === 'listbox') {
+  if (looksLikeCombobox(html)) {
     return selectComboboxOption(el, value);
   }
 

@@ -97,12 +97,11 @@ function scoreListbox(listbox: HTMLElement, control: HTMLElement): number {
 
 function pickScopedOptions(control: HTMLElement, doc: Document): HTMLElement[] {
   const owned = listboxRootsForControl(control, doc);
-  if (owned.length) {
-    for (const root of owned) {
-      const options = collectOptionsInRoot(root);
-      if (options.length) return options;
-    }
-    return [];
+  for (const root of owned) {
+    // Owned roots may exist before the menu populates; keep falling through.
+    if (!isDisplayed(root) && collectOptionsInRoot(root).length === 0) continue;
+    const options = collectOptionsInRoot(root);
+    if (options.length) return options;
   }
 
   const listboxes = Array.from(doc.querySelectorAll('[role="listbox"]')).filter(
@@ -113,6 +112,16 @@ function pickScopedOptions(control: HTMLElement, doc: Document): HTMLElement[] {
     const options = collectOptionsInRoot(listbox);
     if (options.length) return options;
   }
+
+  // Last resort: options that share a nearby field container with the control
+  // (Greenhouse/react-select sometimes portals options outside aria-controls).
+  const container =
+    control.closest('fieldset, [role="group"], form, label, div') || control.parentElement;
+  if (container) {
+    const local = collectOptionsInRoot(container);
+    if (local.length) return local;
+  }
+
   return [];
 }
 
