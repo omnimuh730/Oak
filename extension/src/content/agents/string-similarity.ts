@@ -1,6 +1,10 @@
 /** Minimum similarity (0–1) required to accept a non-exact combobox option match. */
 export const OPTION_SIMILARITY_THRESHOLD = 0.9;
 
+function normalize(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 function tokensOf(text: string): string[] {
   return normalize(text)
     .split(/[^a-z0-9]+/)
@@ -8,22 +12,32 @@ function tokensOf(text: string): string[] {
 }
 
 /**
- * True when `option` contains all tokens of `target` as a contiguous run but also
- * has extra tokens (e.g. "Pacific University" ⊂ "Alaska Pacific University").
- * Those are not safe local matches — keep typing / AI-match instead.
+ * True when `option` starts with every token of `target` (trailing words allowed).
+ * Example: "No, I do not have a disability" ⊨
+ *   "No, I do not have a disability and have not had one in the past"
+ */
+export function isTokenPrefixMatch(target: string, option: string): boolean {
+  const want = tokensOf(target);
+  const have = tokensOf(option);
+  if (!want.length || want.length > have.length) return false;
+  return want.every((tok, j) => have[j] === tok);
+}
+
+/**
+ * True when `option` embeds `target` as a contiguous token run but has *leading*
+ * extra tokens — a different entity (e.g. "Pacific University" inside
+ * "Alaska Pacific University"). Trailing elaborations of the same answer are OK.
  */
 export function isProperTokenExtension(target: string, option: string): boolean {
   const want = tokensOf(target);
   const have = tokensOf(option);
   if (!want.length || have.length <= want.length) return false;
   for (let i = 0; i <= have.length - want.length; i++) {
-    if (want.every((tok, j) => have[i + j] === tok)) return true;
+    if (want.every((tok, j) => have[i + j] === tok)) {
+      return i > 0;
+    }
   }
   return false;
-}
-
-function normalize(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 /** Classic edit-distance DP matrix. */

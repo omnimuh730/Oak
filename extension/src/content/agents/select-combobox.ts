@@ -5,6 +5,7 @@ import {
   OPTION_SIMILARITY_THRESHOLD,
   bestSimilarityMatch,
   isProperTokenExtension,
+  isTokenPrefixMatch,
   stringSimilarity,
 } from './string-similarity';
 import { waitMs } from './wait';
@@ -187,20 +188,23 @@ function findLocalMatch(
   }
 
   if (target.length >= 4) {
-    // Allow country-code style "United States +1", or an option that starts with the
-    // intended value. Reject proper supersets like "Alaska Pacific University".
+    // Same answer with longer wording (disability / veteran blurbs), or country "+1".
+    // Do NOT require 90% edit similarity — long trailing text tanks Levenshtein.
     const prefix = options.find((opt) => {
-      const text = normalize(optionText(opt));
-      if (isProperTokenExtension(value, optionText(opt))) return false;
+      const label = optionText(opt);
+      if (isProperTokenExtension(value, label)) return false;
+      if (isTokenPrefixMatch(value, label)) return true;
+      const text = normalize(label);
       if (text.startsWith(target)) return true;
       if (text.includes(`${target}+`) || text.startsWith(`${target} +`)) return true;
       return false;
     });
     if (prefix) {
-      const score = stringSimilarity(value, optionText(prefix));
-      if (score >= OPTION_SIMILARITY_THRESHOLD) {
-        return { match: prefix, score, strategy: 'prefix' };
-      }
+      return {
+        match: prefix,
+        score: stringSimilarity(value, optionText(prefix)),
+        strategy: 'prefix',
+      };
     }
   }
 
