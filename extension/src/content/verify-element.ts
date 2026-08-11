@@ -112,6 +112,7 @@ function inferRole(el: Element): string {
     if (type === 'file') return 'file';
     if (type === 'radio') return 'radio';
     if (type === 'checkbox') return 'checkbox';
+    if (type === 'password') return 'password';
     if (type === 'submit' || type === 'button' || type === 'image') return 'submit button';
     if (type === 'hidden') return 'hidden';
     if (type === 'tel') return 'tel';
@@ -120,8 +121,7 @@ function inferRole(el: Element): string {
     if (
       html.getAttribute('aria-haspopup') === 'listbox' ||
       html.getAttribute('aria-autocomplete') === 'list' ||
-      (html.hasAttribute('aria-expanded') && html.hasAttribute('aria-controls')) ||
-      /\bselect__input\b/i.test(typeof html.className === 'string' ? html.className : '')
+      (html.hasAttribute('aria-expanded') && html.hasAttribute('aria-controls'))
     ) {
       return 'combobox';
     }
@@ -140,9 +140,10 @@ function roleMatches(expected: string, actual: string, el: Element): boolean {
   if (exp === act) return true;
 
   const aliases: Record<string, string[]> = {
-    textbox: ['textbox', 'text', 'input', 'searchbox', 'email', 'tel', 'url', 'spinbutton'],
+    textbox: ['textbox', 'text', 'input', 'searchbox', 'email', 'tel', 'url', 'spinbutton', 'password'],
+    password: ['password', 'textbox', 'text', 'input'],
     spinbutton: ['spinbutton', 'textbox', 'text', 'input', 'number'],
-    // Greenhouse select__input often looks like a textbox to the planner.
+    // Search-style select inputs often look like a textbox to the planner.
     combobox: ['combobox', 'select', 'listbox', 'dropdown', 'textbox', 'text', 'input', 'searchbox'],
     file: ['file', 'upload'],
     radio: ['radio', 'radiogroup'],

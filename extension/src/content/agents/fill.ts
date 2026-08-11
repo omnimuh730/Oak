@@ -1,14 +1,18 @@
+import {
+  findAssociatedCombobox,
+  isEnhancedSelect,
+  resolveDropdownInteractionTarget,
+} from './enhanced-select';
 import { selectComboboxOption } from './select-combobox';
+import { selectRadioElement } from './select-radio';
 
-/** Greenhouse/react-select search inputs often omit role=combobox on the <input>. */
+/** ARIA / structural combobox signals (no vendor class allowlists). */
 function looksLikeCombobox(el: HTMLElement): boolean {
   const role = (el.getAttribute('role') || '').toLowerCase();
   if (role === 'combobox' || role === 'listbox') return true;
   if (el.getAttribute('aria-haspopup') === 'listbox') return true;
   if (el.getAttribute('aria-autocomplete') === 'list') return true;
   if (el.hasAttribute('aria-expanded') && el.hasAttribute('aria-controls')) return true;
-  const cls = typeof el.className === 'string' ? el.className : '';
-  if (/\bselect__input\b/i.test(cls) || /\bSelect-input\b/.test(cls)) return true;
   return false;
 }
 
@@ -59,18 +63,30 @@ export async function fillElement(el: Element, value: string): Promise<string> {
   html.focus?.();
 
   if (el instanceof HTMLSelectElement) {
+    const enhanced = isEnhancedSelect(el);
+    const combo = findAssociatedCombobox(el);
+    // #region agent log
+    fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'fill.ts:select',message:'Select fill routing',data:{selectId:el.id||null,optionCount:el.options.length,enhanced,hasCombo:Boolean(combo),comboTag:combo?.tagName||null,comboId:combo?.id||null,valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (enhanced && combo) {
+      return selectComboboxOption(combo, value);
+    }
     return fillSelect(el, value);
   }
 
   if (el instanceof HTMLInputElement) {
     const type = (el.type || 'text').toLowerCase();
     if (type === 'checkbox' || type === 'radio') {
-      const shouldCheck = /^(true|yes|1|on|checked)$/i.test(value);
-      if (el.checked !== shouldCheck) el.click();
-      return String(el.checked);
+      // Option labels ("None/Not applicable") must resolve via group matching —
+      // boolean-only toggling left required checkbox groups unchecked.
+      return selectRadioElement(el, value);
     }
     if (looksLikeCombobox(html)) {
-      return selectComboboxOption(el, value);
+      const target = resolveDropdownInteractionTarget(html);
+      // #region agent log
+      fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'fill.ts:comboboxInput',message:'Combobox input remapped',data:{fromTag:html.tagName,fromId:html.id||null,fromAriaHidden:html.getAttribute('aria-hidden'),toTag:target.tagName,toId:target.id||null,remapped:target!==html,valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      return selectComboboxOption(target, value);
     }
     await setNativeValue(el, value);
     return el.value;
@@ -88,7 +104,11 @@ export async function fillElement(el: Element, value: string): Promise<string> {
   }
 
   if (looksLikeCombobox(html)) {
-    return selectComboboxOption(el, value);
+    const target = resolveDropdownInteractionTarget(html);
+    // #region agent log
+    fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'fill.ts:comboboxEl',message:'Combobox element remapped',data:{fromTag:html.tagName,fromId:html.id||null,toTag:target.tagName,toId:target.id||null,remapped:target!==html,valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return selectComboboxOption(target, value);
   }
 
   throw new Error(`Unsupported fill target <${el.tagName.toLowerCase()}>`);

@@ -1,3 +1,4 @@
+import { resolveDropdownInteractionTarget } from './enhanced-select';
 import { askAiMatchOption } from './match-option-client';
 import { readControlValue } from './read-control-value';
 import {
@@ -19,6 +20,16 @@ function normalize(text: string): string {
 
 function optionText(el: Element): string {
   return ((el as HTMLElement).innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function isPlaceholderOption(text: string): boolean {
+  const n = normalize(text);
+  if (!n) return true;
+  const stripped = n.replace(/^[—\-–•·.|]+|[—\-–•·.|]+$/g, '').trim();
+  if (!stripped) return true;
+  return /^(select(\s|$)|choose(\s|$)|pick(\s|$)|make a selection|type to search|please select|no results|no matches|nothing found|no options)/i.test(
+    stripped,
+  );
 }
 
 function isDisplayed(el: HTMLElement): boolean {
@@ -47,22 +58,39 @@ function dismissOpenOverlays(doc: Document, control: HTMLElement): void {
   );
 }
 
-function listboxRootsForControl(control: HTMLElement, doc: Document): HTMLElement[] {
-  const roots: HTMLElement[] = [];
-  const refIds = [
-    control.getAttribute('aria-controls'),
-    control.getAttribute('aria-owns'),
-    control.getAttribute('list'),
-  ]
+function collectRefIds(el: HTMLElement): string[] {
+  return [el.getAttribute('aria-controls'), el.getAttribute('aria-owns'), el.getAttribute('list')]
     .filter(Boolean)
     .join(' ')
     .split(/\s+/)
     .filter(Boolean);
+}
 
-  for (const id of refIds) {
-    const node = doc.getElementById(id);
-    if (node instanceof HTMLElement) roots.push(node);
+function listboxRootsForControl(control: HTMLElement, doc: Document): HTMLElement[] {
+  const roots: HTMLElement[] = [];
+  const seen = new Set<string>();
+
+  const addIds = (ids: string[]) => {
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const node = doc.getElementById(id);
+      if (node instanceof HTMLElement) roots.push(node);
+    }
+  };
+
+  addIds(collectRefIds(control));
+
+  // Custom widgets often put aria-owns on a sibling/ancestor container, not the trigger.
+  let node: HTMLElement | null = control.parentElement;
+  for (let depth = 0; depth < 5 && node; depth++) {
+    addIds(collectRefIds(node));
+    for (const child of Array.from(node.children)) {
+      if (child instanceof HTMLElement) addIds(collectRefIds(child));
+    }
+    node = node.parentElement;
   }
+
   return roots;
 }
 
@@ -79,7 +107,7 @@ function collectOptionsInRoot(root: ParentNode): HTMLElement[] {
       const html = node as HTMLElement;
       if (!isDisplayed(html)) continue;
       const text = optionText(html);
-      if (!text || text.length > 200) continue;
+      if (!text || text.length > 200 || isPlaceholderOption(text)) continue;
       found.add(html);
     }
   }
@@ -202,10 +230,34 @@ async function focusAndOpenCombobox(el: HTMLElement): Promise<void> {
   el.focus?.();
   pointerClick(el);
   await waitMs(80);
+  // Clear any leftover filter text so the full option list is visible.
+  const input = resolveTypeableInput(el);
+  if (input) {
+    input.removeAttribute('aria-hidden');
+    setInputValue(input, '');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await waitMs(60);
+  }
 }
 
-function isTypeableCombobox(el: HTMLElement): boolean {
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+function resolveTypeableInput(el: HTMLElement): HTMLInputElement | HTMLTextAreaElement | null {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el;
+  const root = el.parentElement || el;
+  const candidates = Array.from(
+    root.querySelectorAll(
+      'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea',
+    ),
+  ).filter((node): node is HTMLInputElement | HTMLTextAreaElement => {
+    if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) return false;
+    const role = (node.getAttribute('role') || '').toLowerCase();
+    return (
+      role === 'combobox' ||
+      node.getAttribute('aria-autocomplete') === 'list' ||
+      node.type === 'search' ||
+      node.type === 'text'
+    );
+  });
+  return candidates.find((node) => isDisplayed(node as HTMLElement)) || candidates[0] || null;
 }
 
 function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, text: string): void {
@@ -218,8 +270,10 @@ function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, text: string)
 
 /** Type the full query string into an already-focused open combobox. */
 async function typeQueryIntoOpenCombobox(el: HTMLElement, query: string): Promise<void> {
-  if (!isTypeableCombobox(el)) return;
-  const input = el as HTMLInputElement | HTMLTextAreaElement;
+  const input = resolveTypeableInput(el);
+  if (!input) return;
+  // Nested search inputs are often aria-hidden until the menu opens.
+  input.removeAttribute('aria-hidden');
   input.focus();
   setInputValue(input, '');
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -285,12 +339,17 @@ async function matchFromCandidates(
  * 2) If still unmatched: type one word at a time, wait for filtered list, AI-match again
  */
 export async function selectComboboxOption(el: Element, value: string): Promise<string> {
-  const html = el as HTMLElement;
-  const doc = el.ownerDocument || document;
+  const requested = el as HTMLElement;
+  const html = resolveDropdownInteractionTarget(requested);
+  const doc = html.ownerDocument || document;
   const fieldLabel =
     html.getAttribute('aria-label') ||
+    requested.getAttribute('aria-label') ||
     (html.id
       ? doc.querySelector(`label[for="${CSS.escape(html.id)}"]`)?.textContent?.trim()
+      : null) ||
+    (requested.id
+      ? doc.querySelector(`label[for="${CSS.escape(requested.id)}"]`)?.textContent?.trim()
       : null) ||
     null;
 
@@ -306,10 +365,15 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
     options = await waitForScopedOptions(html, doc);
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4e43d4'},body:JSON.stringify({sessionId:'4e43d4',runId:'dropdown-v3',hypothesisId:'F',location:'select-combobox.ts:options',message:'Combobox options after open',data:{requestedTag:requested.tagName,requestedId:requested.id||null,tag:html.tagName,role:html.getAttribute('role'),id:html.id||null,remapped:html!==requested,optionCount:options.length,optionPreview:options.slice(0,8).map(optionText),valueLen:value.length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
   let { match, score } = await matchFromCandidates(options, value, fieldLabel, null);
 
   // Word-by-word typing only when initial candidates (local+AI) did not resolve.
-  if (!match && isTypeableCombobox(html) && value.trim().length >= 2) {
+  const typeable = resolveTypeableInput(html);
+  if (!match && typeable && value.trim().length >= 2) {
     const words = value.trim().split(/\s+/).filter(Boolean);
     let typed = '';
 

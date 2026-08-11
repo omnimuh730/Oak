@@ -16,6 +16,8 @@ export interface DomTreePayload {
   fetchedAt: string;
   tabId?: number;
   frameId?: number;
+  /** Fillable control count used to pick the form frame among iframes. */
+  formScore?: number;
 }
 
 /** @deprecated use DEFAULT_ATHENS_API_URL from auth/oak-auth */
@@ -33,6 +35,8 @@ export const MSG = {
   EXECUTE_ACTIONS: 'oak:execute-actions',
   PLAN_STEP: 'oak:plan-step',
   MATCH_OPTION: 'oak:match-option',
+  /** Debug-session NDJSON relay (content → background → ingest). */
+  DEBUG_LOG: 'oak:debug-log',
   START_PIPELINE: 'oak:start-pipeline',
   PIPELINE_PROGRESS: 'oak:pipeline-progress',
   SIDEBAR_OPEN: 'oak:sidebar-open',
