@@ -126,11 +126,11 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
   } = args;
 
   const startedAt = Date.now();
-  beginPipelineUsageTracking();
+  beginPipelineUsageTracking(tabId);
 
   const finishMeta = () => {
     const durationMs = Date.now() - startedAt;
-    const usage = endPipelineUsageTracking();
+    const usage = endPipelineUsageTracking(tabId);
     return { durationMs, usage };
   };
 
@@ -162,7 +162,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
       },
       aiServerUrl,
     );
-    addPipelineUsage(analyze.usage);
+    addPipelineUsage(tabId, analyze.usage);
 
     const plan = analyze.plan as ActionPlan;
     const stepTotal = plan.actions?.length ?? 0;

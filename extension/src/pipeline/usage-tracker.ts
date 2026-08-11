@@ -1,6 +1,7 @@
 import type { AiUsageSummary } from '../../../shared/ai-usage';
 
-let active: AiUsageSummary | null = null;
+/** Per-tab usage buckets so parallel pipelines don't mix costs. */
+const activeByTab = new Map<number, AiUsageSummary>();
 
 function emptyUsage(): AiUsageSummary {
   return {
@@ -15,11 +16,15 @@ function emptyUsage(): AiUsageSummary {
   };
 }
 
-export function beginPipelineUsageTracking(): void {
-  active = emptyUsage();
+export function beginPipelineUsageTracking(tabId: number): void {
+  activeByTab.set(tabId, emptyUsage());
 }
 
-export function addPipelineUsage(part: AiUsageSummary | null | undefined): void {
+export function addPipelineUsage(
+  tabId: number,
+  part: AiUsageSummary | null | undefined,
+): void {
+  const active = activeByTab.get(tabId);
   if (!active || !part) return;
 
   active.inputTokens += part.inputTokens || 0;
@@ -45,9 +50,9 @@ export function addPipelineUsage(part: AiUsageSummary | null | undefined): void 
   }
 }
 
-export function endPipelineUsageTracking(): AiUsageSummary | null {
-  const summary = active;
-  active = null;
+export function endPipelineUsageTracking(tabId: number): AiUsageSummary | null {
+  const summary = activeByTab.get(tabId) ?? null;
+  activeByTab.delete(tabId);
   if (!summary) return null;
   if (typeof summary.costUsd === 'number') {
     summary.costUsd = Math.round(summary.costUsd * 1e6) / 1e6;
@@ -55,6 +60,6 @@ export function endPipelineUsageTracking(): AiUsageSummary | null {
   return summary;
 }
 
-export function isPipelineUsageTracking(): boolean {
-  return active != null;
+export function isPipelineUsageTracking(tabId: number): boolean {
+  return activeByTab.has(tabId);
 }

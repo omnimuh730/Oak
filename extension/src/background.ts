@@ -25,7 +25,8 @@ import {
 
 let socket: Socket | null = null;
 let socketConnected = false;
-let pipelineRunningTabId: number | null = null;
+/** Tabs with an in-flight FAB pipeline (parallel across tabs; one per tab). */
+const pipelineRunningTabIds = new Set<number>();
 
 async function broadcastPipelineProgress(tabId: number, progress: PipelineProgress): Promise<void> {
   socket?.emit('pipeline:progress', { tabId, progress });
@@ -233,12 +234,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ error: 'No tab for pipeline' });
       return true;
     }
-    if (pipelineRunningTabId != null) {
-      sendResponse({ error: 'A pipeline is already running' });
+    if (pipelineRunningTabIds.has(tabId)) {
+      sendResponse({ error: 'A pipeline is already running on this tab' });
       return true;
     }
 
-    pipelineRunningTabId = tabId;
+    pipelineRunningTabIds.add(tabId);
     sendResponse({ ok: true });
 
     void (async () => {
@@ -273,14 +274,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           error,
         });
       } finally {
-        pipelineRunningTabId = null;
+        pipelineRunningTabIds.delete(tabId);
       }
     })();
 
     return true;
   }
+
   if (message.type === MSG.MATCH_OPTION) {
     const body = message.payload as MatchOptionRequest;
+    const usageTabId = sender.tab?.id;
     (async () => {
       try {
         const base = await getAthensApiUrl();
@@ -298,8 +301,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } satisfies MatchOptionResponse);
           return;
         }
-        if (pipelineRunningTabId != null && data.usage) {
-          addPipelineUsage(data.usage);
+        if (
+          usageTabId != null &&
+          pipelineRunningTabIds.has(usageTabId) &&
+          data.usage
+        ) {
+          addPipelineUsage(usageTabId, data.usage);
         }
         sendResponse(data);
       } catch (err) {
