@@ -17,6 +17,22 @@ function pushLabel(labels: string[], value: string | null | undefined): void {
   if (text) labels.push(text);
 }
 
+const FIELD_TITLE_TAGS = /^(LABEL|LEGEND|H1|H2|H3|H4|H5|H6|P|SPAN|STRONG|DIV|DT|DD)$/;
+const FIELD_TITLE_SNIPPET_CHARS = 240;
+
+function pushFieldTitle(labels: string[], raw: string | null | undefined): void {
+  const text = raw?.replace(/\s+/g, ' ').trim();
+  if (!text) return;
+  pushLabel(labels, text.slice(0, FIELD_TITLE_SNIPPET_CHARS));
+}
+
+/** Native labeled control when the planned node is a <label>, not the input. */
+function associatedControl(el: Element): Element | null {
+  if (!(el instanceof HTMLLabelElement)) return null;
+  if (el.control) return el.control;
+  return el.querySelector('input, select, textarea, button');
+}
+
 /** Field titles often live on siblings/ancestors, not on the control itself (e.g. file "Attach"). */
 function ancestorFieldLabels(el: Element): string[] {
   const labels: string[] = [];
@@ -29,17 +45,19 @@ function ancestorFieldLabels(el: Element): string[] {
     for (const child of Array.from(node.children)) {
       if (child === el || child.contains(el)) continue;
       const tag = child.tagName.toUpperCase();
-      if (!/^(LABEL|LEGEND|H1|H2|H3|H4|H5|H6|P|SPAN|STRONG|DIV|DT|DD)$/.test(tag)) {
-        continue;
-      }
+      if (!FIELD_TITLE_TAGS.test(tag)) continue;
       const html = child as HTMLElement;
       const hasNestedControl = Boolean(child.querySelector('input, select, textarea, button, a'));
       if (hasNestedControl && tag !== 'LABEL' && tag !== 'LEGEND') continue;
+      pushFieldTitle(labels, html.innerText || html.textContent);
+    }
 
-      const raw = (html.innerText || html.textContent || '').trim();
-      if (!raw || raw.length > 240) continue;
-      const firstLine = raw.split('\n').map((l) => l.trim()).find(Boolean);
-      pushLabel(labels, firstLine);
+    const prev = node.previousElementSibling;
+    if (prev && FIELD_TITLE_TAGS.test(prev.tagName.toUpperCase())) {
+      pushFieldTitle(
+        labels,
+        (prev as HTMLElement).innerText || prev.textContent,
+      );
     }
 
     node = node.parentElement;
@@ -81,8 +99,8 @@ function labelCandidates(el: Element): string[] {
   pushLabel(primary, fieldset?.querySelector?.('legend')?.textContent);
 
   const prev = html.previousElementSibling;
-  if (prev && /^(LABEL|SPAN|P|DIV|LEGEND|STRONG)$/i.test(prev.tagName)) {
-    pushLabel(primary, (prev as HTMLElement).innerText || prev.textContent);
+  if (prev && FIELD_TITLE_TAGS.test(prev.tagName.toUpperCase())) {
+    pushFieldTitle(primary, (prev as HTMLElement).innerText || prev.textContent);
   }
 
   for (const label of ancestorFieldLabels(el)) {
@@ -185,8 +203,8 @@ export function verifyElementByPlan(
   expectedLabel: string | null,
   expectedRole: string | null,
 ): VerifyResult {
-  const el = resolveElementByNodeId(elementIndex);
-  if (!el) {
+  const resolved = resolveElementByNodeId(elementIndex);
+  if (!resolved) {
     return {
       ok: false,
       element: null,
@@ -194,6 +212,7 @@ export function verifyElementByPlan(
     };
   }
 
+  const el = associatedControl(resolved) ?? resolved;
   const matchedRole = inferRole(el);
   const candidates = labelCandidates(el);
   const matchedLabel = candidates[0] || '';

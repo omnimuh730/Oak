@@ -148,7 +148,9 @@ export function controlAlreadyMatches(
   if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
     const booleanLike =
       /^(true|yes|1|on|checked|false|no|0|off|unchecked)$/i.test(intendedStr.trim());
-    if (booleanLike) {
+    // Radios: Yes/No is the option to select, not checked/unchecked.
+    // Checkboxes: Yes/No means the box should be on/off.
+    if (booleanLike && el.type === 'checkbox') {
       const wantChecked = /^(true|yes|1|on|checked)$/i.test(intendedStr.trim());
       return debugAlreadyFilled(
         'D',

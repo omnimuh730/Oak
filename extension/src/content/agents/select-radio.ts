@@ -173,6 +173,12 @@ export async function selectRadioElement(
     }
   }
 
+  // Custom choice buttons: the planned node is the option to activate.
+  if (el instanceof HTMLButtonElement && intended && labelsMatch(html, intended)) {
+    html.click();
+    return optionLabel(html) || intended;
+  }
+
   if (intended) {
     const root = groupRoot(html);
     const checkbox = findChoiceInGroup(root, intended, 'checkbox');
