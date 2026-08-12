@@ -43,6 +43,7 @@ export const MSG = {
   AUTH_STATUS: 'oak:auth-status',
   AUTH_SIGNIN: 'oak:auth-signin',
   AUTH_SIGNOUT: 'oak:auth-signout',
+  DEBUG_LOG: 'oak:debug-log',
 } as const;
 
 export interface MatchOptionRequest {

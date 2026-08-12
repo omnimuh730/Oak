@@ -47,6 +47,11 @@ async function broadcastPipelineProgress(tabId: number, progress: PipelineProgre
 }
 
 const KEEP_ALIVE_ALARM = 'oak-socket-keep-alive';
+// #region agent log
+const DEBUG_LOG_INGEST_URL =
+  'http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31';
+const DEBUG_LOG_SESSION_ID = '30bd90';
+// #endregion
 chrome.alarms.create(KEEP_ALIVE_ALARM, { periodInMinutes: 0.5 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -171,6 +176,18 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === MSG.DEBUG_LOG) {
+    // #region agent log
+    const payload = message.payload ?? {};
+    fetch(DEBUG_LOG_INGEST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': DEBUG_LOG_SESSION_ID },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+    // #endregion
+    return false;
+  }
+
   if (message.type === MSG.SOCKET_STATUS) {
     sendResponse({ connected: socketConnected });
     return true;

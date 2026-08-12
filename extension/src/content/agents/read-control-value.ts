@@ -1,3 +1,5 @@
+import { isChoiceSelected, isChoiceWidget } from './choice-state';
+
 const PLACEHOLDER_VALUES = new Set(['', 'select...', 'select', 'choose...', 'choose']);
 
 function normalize(text: string): string {
@@ -134,6 +136,10 @@ export function readControlValue(el: Element | null): string {
     const displayed = readComboboxDisplayValue(el);
     if (displayed) return displayed;
   }
+
+  // Choice widgets always contain their option label; that is not a filled value
+  // unless the control is actually selected.
+  if (isChoiceWidget(el) && !isChoiceSelected(el)) return '';
 
   const text = ((el as HTMLElement).innerText || el.textContent || '').trim();
   return isPlaceholder(text) ? '' : text;

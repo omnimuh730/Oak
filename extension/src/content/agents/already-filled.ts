@@ -1,3 +1,5 @@
+import { MSG } from '../../types';
+import { isChoiceSelected, isChoiceWidget } from './choice-state';
 import { readControlValue } from './read-control-value';
 
 function normalize(text: string): string {
@@ -33,6 +35,63 @@ function isSelectedOption(el: Element): boolean {
   return false;
 }
 
+function safePreview(text: string): string {
+  const n = String(text || '').replace(/\s+/g, ' ').trim();
+  if (/^(true|yes|no|false|1|0|on|off|checked|unchecked|\d+\+?)$/i.test(n)) return n;
+  return `len=${n.length}`;
+}
+
+function elementSnapshot(el: Element): Record<string, unknown> {
+  const html = el as HTMLElement;
+  const input = el instanceof HTMLInputElement ? el : null;
+  return {
+    tag: el.tagName,
+    role: (html.getAttribute?.('role') || '').toLowerCase(),
+    type: input?.type || '',
+    checked: input ? input.checked : null,
+    ariaChecked: html.getAttribute?.('aria-checked'),
+    ariaPressed: html.getAttribute?.('aria-pressed'),
+    ariaSelected: html.getAttribute?.('aria-selected'),
+    classHasSelected:
+      html.classList?.contains('selected') || html.classList?.contains('is-selected') || false,
+  };
+}
+
+function sendAgentLog(payload: Record<string, unknown>): void {
+  try {
+    chrome.runtime.sendMessage({ type: MSG.DEBUG_LOG, payload });
+  } catch {
+    /* ignore */
+  }
+}
+
+function debugAlreadyFilled(
+  hypothesisId: string,
+  branch: string,
+  matched: boolean,
+  current: string,
+  intended: string,
+  el: Element,
+): { matched: boolean; current: string } {
+  // #region agent log
+  sendAgentLog({
+    sessionId: '30bd90',
+    hypothesisId,
+    location: 'already-filled.ts:controlAlreadyMatches',
+    message: 'already-match decision',
+    data: {
+      branch,
+      matched,
+      intended: safePreview(intended),
+      current: safePreview(current),
+      ...elementSnapshot(el),
+    },
+    timestamp: Date.now(),
+  });
+  // #endregion
+  return { matched, current };
+}
+
 /** True when the live control already shows the intended answer (autofill / prior fill). */
 export function controlAlreadyMatches(
   el: Element,
@@ -40,45 +99,65 @@ export function controlAlreadyMatches(
   opts?: { fileName?: string | null },
 ): { matched: boolean; current: string } {
   if (intended == null || !String(intended).trim()) {
-    return { matched: false, current: readControlValue(el) };
+    return debugAlreadyFilled(
+      'A',
+      'empty-intended',
+      false,
+      readControlValue(el),
+      String(intended ?? ''),
+      el,
+    );
   }
 
+  const intendedStr = String(intended);
   const role = ((el as HTMLElement).getAttribute?.('role') || '').toLowerCase();
   // role=option always "contains" its own label — only count as filled when selected.
   if (role === 'option' || el instanceof HTMLOptionElement) {
     const label = optionOwnLabel(el);
-    const want = normalize(String(intended));
+    const want = normalize(intendedStr);
     const have = normalize(label);
     const labelMatches =
       Boolean(have) && (have === want || have.includes(want) || want.includes(have));
     const selected = isSelectedOption(el);
-    return {
-      matched: selected && labelMatches,
-      current: selected ? label : '',
-    };
+    return debugAlreadyFilled(
+      'E',
+      selected && labelMatches ? 'option-selected' : 'option-unselected',
+      selected && labelMatches,
+      selected ? label : '',
+      intendedStr,
+      el,
+    );
   }
 
   const current = readControlValue(el);
 
   if (el instanceof HTMLInputElement && el.type === 'file') {
-    if (!current) return { matched: false, current };
+    if (!current) {
+      return debugAlreadyFilled('A', 'file-empty', false, current, intendedStr, el);
+    }
     const want = opts?.fileName?.trim();
-    if (!want) return { matched: true, current };
-    return {
-      matched:
-        normalize(current) === normalize(want) ||
-        normalize(current).includes(normalize(want)),
-      current,
-    };
+    if (!want) {
+      return debugAlreadyFilled('A', 'file-any', true, current, intendedStr, el);
+    }
+    const matched =
+      normalize(current) === normalize(want) ||
+      normalize(current).includes(normalize(want));
+    return debugAlreadyFilled('A', 'file-name', matched, current, intendedStr, el);
   }
 
   if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
-    const intendedStr = String(intended).trim();
     const booleanLike =
-      /^(true|yes|1|on|checked|false|no|0|off|unchecked)$/i.test(intendedStr);
+      /^(true|yes|1|on|checked|false|no|0|off|unchecked)$/i.test(intendedStr.trim());
     if (booleanLike) {
-      const wantChecked = /^(true|yes|1|on|checked)$/i.test(intendedStr);
-      return { matched: el.checked === wantChecked, current: String(el.checked) };
+      const wantChecked = /^(true|yes|1|on|checked)$/i.test(intendedStr.trim());
+      return debugAlreadyFilled(
+        'D',
+        'native-bool',
+        el.checked === wantChecked,
+        String(el.checked),
+        intendedStr,
+        el,
+      );
     }
     const id = el.id;
     const byFor =
@@ -100,26 +179,51 @@ export function controlAlreadyMatches(
     const labelMatches = Boolean(
       label && (label === want || label.includes(want) || want.includes(label)),
     );
-    return {
-      matched: labelMatches && el.checked,
-      current: el.checked ? label || String(el.checked) : '',
-    };
+    return debugAlreadyFilled(
+      'D',
+      'native-label',
+      labelMatches && el.checked,
+      el.checked ? label || String(el.checked) : '',
+      intendedStr,
+      el,
+    );
   }
 
-  const want = normalize(String(intended));
-  const have = normalize(current);
-  if (!have) return { matched: false, current };
-  if (have === want) return { matched: true, current };
+  if (isChoiceWidget(el)) {
+    const selected = isChoiceSelected(el);
+    const label = optionOwnLabel(el);
+    const want = normalize(intendedStr);
+    const have = normalize(label);
+    const labelMatches =
+      Boolean(have) && (have === want || have.includes(want) || want.includes(have));
+    return debugAlreadyFilled(
+      'B',
+      selected && labelMatches ? 'choice-selected' : 'choice-unselected',
+      Boolean(selected && labelMatches),
+      selected ? label : '',
+      intendedStr,
+      el,
+    );
+  }
 
-  const wantLoose = normalizeLoose(String(intended));
+  const want = normalize(intendedStr);
+  const have = normalize(current);
+  if (!have) {
+    return debugAlreadyFilled('A', 'generic-empty', false, current, intendedStr, el);
+  }
+  if (have === want) {
+    return debugAlreadyFilled('B', 'generic-exact', true, current, intendedStr, el);
+  }
+
+  const wantLoose = normalizeLoose(intendedStr);
   const haveLoose = normalizeLoose(current);
   if (wantLoose && haveLoose && wantLoose === haveLoose) {
-    return { matched: true, current };
+    return debugAlreadyFilled('B', 'generic-loose', true, current, intendedStr, el);
   }
 
   if (want.length >= 2 && (have.startsWith(want) || want.startsWith(have))) {
-    return { matched: true, current };
+    return debugAlreadyFilled('C', 'generic-prefix', true, current, intendedStr, el);
   }
 
-  return { matched: false, current };
+  return debugAlreadyFilled('A', 'generic-no-match', false, current, intendedStr, el);
 }

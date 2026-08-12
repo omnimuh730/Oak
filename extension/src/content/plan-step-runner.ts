@@ -1,4 +1,4 @@
-import type { PlanStepPayload, PlanStepResult } from '../types';
+import { MSG, type PlanStepPayload, type PlanStepResult } from '../types';
 import { controlAlreadyMatches } from './agents/already-filled';
 import { fillElement } from './agents/fill';
 import { readControlValue } from './agents/read-control-value';
@@ -9,7 +9,45 @@ import { waitMs } from './agents/wait';
 import { highlightElement } from './highlighter';
 import { verifyElementByPlan } from './verify-element';
 
+function sendDebugLog(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>,
+): void {
+  // #region agent log
+  try {
+    chrome.runtime.sendMessage({
+      type: MSG.DEBUG_LOG,
+      payload: {
+        sessionId: '30bd90',
+        hypothesisId,
+        location,
+        message,
+        data,
+        timestamp: Date.now(),
+      },
+    });
+  } catch {
+    /* ignore */
+  }
+  // #endregion
+}
+
+function intendedPreview(value: string | null | undefined): string | undefined {
+  const n = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (/^(true|yes|no|false|1|0|on|off|checked|unchecked|\d+\+?)$/i.test(n)) return n;
+  return undefined;
+}
+
 export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult> {
+  sendDebugLog('F', 'plan-step-runner.ts:entry', 'plan-step entry', {
+    action: step.action,
+    nodeId: step.element_index ?? null,
+    intendedLen: String(step.value ?? '').length,
+    intendedPreview: intendedPreview(step.value),
+  });
+
   if (step.action === 'wait') {
     const ms = await waitMs(step.ms);
     return { ok: true, verified: true, acted: true, details: { valueAfter: `${ms}ms` } };
@@ -51,6 +89,12 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
   );
 
   if (!verified.ok || !verified.element) {
+    sendDebugLog('F', 'plan-step-runner.ts:verifyFailed', 'plan-step verify failed', {
+      action: step.action,
+      nodeId: step.element_index,
+      error: verified.error || 'Verification failed',
+      matchedRole: verified.matchedRole ?? null,
+    });
     return {
       ok: false,
       verified: false,
@@ -85,6 +129,37 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
     const prior = controlAlreadyMatches(verified.element, step.value, {
       fileName: step.file?.name ?? null,
     });
+    const html = verified.element as HTMLElement;
+    const input = verified.element instanceof HTMLInputElement ? verified.element : null;
+    // #region agent log
+    try {
+      chrome.runtime.sendMessage({
+        type: MSG.DEBUG_LOG,
+        payload: {
+          sessionId: '30bd90',
+          hypothesisId: prior.matched ? 'B' : 'A',
+          location: 'plan-step-runner.ts:alreadyFilledGate',
+          message: 'plan-step alreadyFilled gate',
+          data: {
+            action: step.action,
+            nodeId: step.element_index,
+            alreadyFilled: prior.matched,
+            matchedRole: verified.matchedRole,
+            tag: verified.element.tagName,
+            role: (html.getAttribute?.('role') || '').toLowerCase(),
+            type: input?.type || '',
+            checked: input ? input.checked : null,
+            ariaChecked: html.getAttribute?.('aria-checked'),
+            ariaPressed: html.getAttribute?.('aria-pressed'),
+            currentLen: String(prior.current || '').length,
+          },
+          timestamp: Date.now(),
+        },
+      });
+    } catch {
+      /* ignore */
+    }
+    // #endregion
     if (prior.matched) {
       return {
         ok: true,
@@ -121,6 +196,15 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
       }
       case 'select_radio': {
         valueAfter = await selectRadioElement(verified.element, step.value);
+        const input = verified.element instanceof HTMLInputElement ? verified.element : null;
+        sendDebugLog('G', 'plan-step-runner.ts:selectRadioActed', 'select_radio acted', {
+          nodeId: step.element_index,
+          tag: verified.element.tagName,
+          type: input?.type || '',
+          checkedAfter: input ? input.checked : null,
+          intendedPreview: intendedPreview(step.value),
+          valueAfterLen: String(valueAfter || '').length,
+        });
         break;
       }
       default:
@@ -140,11 +224,19 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
       },
     };
   } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    sendDebugLog('G', 'plan-step-runner.ts:actFailed', 'plan-step act failed', {
+      action: step.action,
+      nodeId: step.element_index,
+      tag: verified.element.tagName,
+      error,
+      intendedPreview: intendedPreview(step.value),
+    });
     return {
       ok: false,
       verified: true,
       acted: false,
-      error: err instanceof Error ? err.message : String(err),
+      error,
       details: {
         nodeId: step.element_index,
         matchedLabel: verified.matchedLabel,
