@@ -17,6 +17,7 @@ import {
 } from '../auth/oak-auth';
 import { MSG, type DomNode, type DomTreePayload } from '../types';
 import { InspectPanel } from './InspectPanel';
+import { ResumeUploadNote } from './ResumeUploadNote';
 import { WorkerPoolList, type OakWorkerJob } from './WorkerPoolList';
 import './SidebarApp.css';
 
@@ -108,6 +109,7 @@ export default function SidebarApp() {
         tree: starting ? next.tree : next.tree ?? prev.tree,
         plan: starting ? next.plan : next.plan ?? prev.plan,
         steps: starting ? next.steps ?? [] : next.steps ?? prev.steps,
+        resumeUpload: starting ? next.resumeUpload : next.resumeUpload ?? prev.resumeUpload,
       }));
       if (next.tree) {
         setLastFetch({
@@ -232,6 +234,7 @@ export default function SidebarApp() {
         jobId: job.id,
         applyUrl: job.applyUrl,
         resumeId: job.recommendedResumeId,
+        resumeStack: job.recommendedResumeStack,
         title: job.title,
         company: job.company,
       });
@@ -427,6 +430,14 @@ export default function SidebarApp() {
           </span>
           <span className="tool-hint">Fetch → Analyze → Fill</span>
         </button>
+        <ResumeUploadNote
+          progress={progress}
+          boundStack={
+            workerJobs.find((job) => job.id === selectedJobId)?.recommendedResumeStack ??
+            null
+          }
+          hasBoundJob={Boolean(selectedJobId)}
+        />
         <div className="tool-grid" style={{ marginTop: 8 }}>
           <button
             type="button"

@@ -1,6 +1,7 @@
 export type OakTabJobBinding = {
   jobId: string;
   resumeId: string | null;
+  resumeStack: string | null;
   applyUrl: string;
   title: string;
   company: string;

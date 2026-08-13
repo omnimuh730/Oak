@@ -310,6 +310,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             typeof message.resumeId === 'string' && message.resumeId.trim()
               ? message.resumeId.trim()
               : null,
+          resumeStack:
+            typeof message.resumeStack === 'string' && message.resumeStack.trim()
+              ? message.resumeStack.trim()
+              : null,
           applyUrl,
           title: String(message.title || ''),
           company: String(message.company || ''),

@@ -3,6 +3,8 @@ import {
   isExecutableStep,
   missingUploadReason,
   resolveStepFile,
+  resumeFileLabel,
+  wantsRecommendedResume,
   type PlanStepFiles,
 } from './step-file';
 import type {
@@ -204,7 +206,9 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
       }
       if (decision === 'skip') {
         steps[i].status = 'skipped';
-        steps[i].message = 'Skipped missing upload file';
+        steps[i].message = wantsRecommendedResume(action)
+          ? 'Skipped — no recommended resume'
+          : 'Skipped missing upload file';
         publish();
         continue;
       }
@@ -226,10 +230,14 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
               ? `already=${result.details.valueAfter}`
               : 'Already filled';
           } else {
+            const uploaded = resumeFileLabel(resolveStepFile(action, files));
             steps[i].status = 'ok';
-            steps[i].message = result.details?.valueAfter
-              ? `value=${result.details.valueAfter}`
-              : undefined;
+            steps[i].message =
+              wantsRecommendedResume(action) && uploaded
+                ? `Uploaded ${uploaded}`
+                : result.details?.valueAfter
+                  ? `value=${result.details.valueAfter}`
+                  : undefined;
           }
           publish();
           done = true;

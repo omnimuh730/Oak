@@ -80,6 +80,7 @@ export interface RuntimeAttachedFile {
   name: string;
   mimeType: string;
   base64: string;
+  label?: string | null;
 }
 
 export interface PlanStepPayload {

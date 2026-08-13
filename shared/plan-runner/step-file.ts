@@ -33,6 +33,13 @@ export function resolveStepFile(
   return null;
 }
 
+export function resumeFileLabel(file: RuntimeAttachedFile | null): string {
+  if (!file) return '';
+  const stack = String(file.label || '').trim();
+  if (stack && stack !== file.name) return `${stack} (${file.name})`;
+  return file.name;
+}
+
 export function missingUploadReason(
   action: PlanAction,
   files: PlanStepFiles,

@@ -36,4 +36,10 @@ export interface PipelineProgress {
   plan?: ActionPlan;
   /** UI-only live plan-run records (ok / skipped / blocked / failed). */
   steps?: RunStepRecord[];
+  /** Library resume used (or skipped) for this tab's Fill run. */
+  resumeUpload?: {
+    status: 'ready' | 'uploaded' | 'skipped';
+    stack: string | null;
+    fileName: string | null;
+  };
 }

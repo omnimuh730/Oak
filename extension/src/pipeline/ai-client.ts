@@ -9,6 +9,13 @@ export interface AiAnalyzePage {
   title?: string;
   url?: string;
   fetchedAt?: string;
+  job?: {
+    id: string;
+    title: string;
+    company: string;
+  } | null;
+  recommendedResumeAvailable?: boolean;
+  recommendedResumeStack?: string | null;
 }
 
 export interface AiAnalyzeRequest {
@@ -105,6 +112,7 @@ export async function fetchRecommendedResume(
   );
   const data = (await res.json().catch(() => ({}))) as {
     file?: RuntimeAttachedFile;
+    stack?: string | null;
     error?: string;
     message?: string;
   };
@@ -118,5 +126,10 @@ export async function fetchRecommendedResume(
           : `Recommended resume failed: ${res.status}`,
     );
   }
-  return data.file ?? null;
+  if (!data.file) return null;
+  const stack = String(data.stack || data.file.label || '').trim();
+  return {
+    ...data.file,
+    label: stack || data.file.name,
+  };
 }

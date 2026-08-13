@@ -16,6 +16,7 @@ import { sendPlanStepToTab, sendTabMessage } from '../tab-messaging';
 import { getTabJob } from '../tab-job-session';
 import { DEFAULT_AI_SERVER, MSG, type DomNode, type DomTreePayload } from '../types';
 import { fetchRecommendedResume, fetchRuntimeFile, requestAiAnalyze } from './ai-client';
+import { buildResumeUploadProgress } from './resume-upload-status';
 import {
   addPipelineUsage,
   beginPipelineUsageTracking,
@@ -154,7 +155,14 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
   try {
     emit({ phase: 'fetching', message: 'Fetching DOM…' });
 
-    const treePayload = await fetchDomFromTab(tabId, preferredFrameId);
+    const tabJob = await getTabJob(tabId);
+    const [treePayload, recommendedResume, runtimeFile] = await Promise.all([
+      fetchDomFromTab(tabId, preferredFrameId),
+      tabJob?.jobId
+        ? fetchRecommendedResume(tabJob.jobId, aiServerUrl).catch(() => null)
+        : Promise.resolve(null),
+      fetchRuntimeFile(aiServerUrl).catch(() => null),
+    ]);
     emitDomTree?.(treePayload);
     treeSnapshot = {
       url: treePayload.url,
@@ -163,11 +171,21 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
       fetchedAt: treePayload.fetchedAt,
     };
 
+    const resumeUpload = () =>
+      buildResumeUploadProgress({
+        recommendedResume,
+        resumeStack: tabJob?.resumeStack ?? null,
+        steps: stepsSnapshot,
+      });
+
     const nodeCount = countDomNodes(treePayload.tree);
     emit({
       phase: 'analyzing',
-      message: `Analyzing ${nodeCount} nodes…`,
+      message: recommendedResume
+        ? `Analyzing ${nodeCount} nodes · resume ${recommendedResume.label || recommendedResume.name}`
+        : `Analyzing ${nodeCount} nodes…`,
       tree: treeSnapshot,
+      resumeUpload: resumeUpload(),
     });
 
     const split = splitDomTree(treePayload.tree);
@@ -182,6 +200,16 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
           title: treePayload.title || 'Untitled',
           url: treePayload.url,
           fetchedAt: treePayload.fetchedAt,
+          job: tabJob
+            ? {
+                id: tabJob.jobId,
+                title: tabJob.title,
+                company: tabJob.company,
+              }
+            : null,
+          recommendedResumeAvailable: Boolean(recommendedResume),
+          recommendedResumeStack:
+            recommendedResume?.label || tabJob?.resumeStack || null,
         },
       },
       aiServerUrl,
@@ -198,13 +226,9 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
       stepIndex: 0,
       stepTotal,
       plan,
+      resumeUpload: resumeUpload(),
     });
 
-    const runtimeFile = await fetchRuntimeFile(aiServerUrl);
-    const tabJob = await getTabJob(tabId);
-    const recommendedResume = tabJob?.jobId
-      ? await fetchRecommendedResume(tabJob.jobId, aiServerUrl)
-      : null;
     const frameId = treePayload.frameId ?? preferredFrameId ?? null;
 
     const report = await runActionPlan({
@@ -247,6 +271,11 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
               ? shortLabel(current.expected_label, current.action)
               : undefined,
             steps,
+            resumeUpload: buildResumeUploadProgress({
+              recommendedResume,
+              resumeStack: tabJob?.resumeStack ?? null,
+              steps,
+            }),
           });
         },
         onPause: async (request) => {
@@ -259,6 +288,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
             stepIndex: request.index,
             stepTotal,
             stepLabel: shortLabel(request.expected_label, request.action),
+            resumeUpload: resumeUpload(),
           });
           return autoPauseDecision(request);
         },
@@ -268,6 +298,12 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     const { durationMs, usage } = finishMeta();
     const timeLabel = formatDuration(durationMs);
     const costLabel = formatUsd(usage?.costUsd);
+
+    const doneResume = buildResumeUploadProgress({
+      recommendedResume,
+      resumeStack: tabJob?.resumeStack ?? null,
+      steps: report.steps,
+    });
 
     if (report.aborted) {
       emit({
@@ -280,6 +316,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
         tree: treeSnapshot,
         plan: planSnapshot,
         steps: report.steps,
+        resumeUpload: doneResume,
       });
       return;
     }
@@ -298,6 +335,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
       tree: treeSnapshot,
       plan: planSnapshot,
       steps: report.steps,
+      resumeUpload: doneResume,
     });
   } catch (err) {
     const { durationMs, usage } = finishMeta();

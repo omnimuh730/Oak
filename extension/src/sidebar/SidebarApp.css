@@ -111,6 +111,31 @@
   background: linear-gradient(135deg, #8b3a3a, #6b2a2a);
 }
 
+.resume-upload-note {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: #1a1d27;
+  border: 1px solid #2e3344;
+  color: #c5c9d6;
+}
+
+.resume-upload-note.ready {
+  border-color: rgba(124, 108, 240, 0.45);
+  color: #c7c4f5;
+}
+
+.resume-upload-note.uploaded {
+  border-color: rgba(120, 180, 140, 0.45);
+  color: #d5f0df;
+}
+
+.resume-upload-note.skipped {
+  color: #8b92a5;
+}
+
 .tree-actions {
   display: flex;
   flex-wrap: wrap;

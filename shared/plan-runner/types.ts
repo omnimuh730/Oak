@@ -47,6 +47,8 @@ export interface RuntimeAttachedFile {
   name: string;
   mimeType: string;
   base64: string;
+  /** Library stack label for UI (e.g. "Go + Python"). */
+  label?: string | null;
 }
 
 export interface PlanStepPayload {
