@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { formatDuration, formatUsd } from '../../../shared/ai-usage';
+import {
+  IDLE_PIPELINE_PROGRESS,
+  mergePipelineProgress,
+  type PipelineProgress,
+} from '../../../shared/pipeline-types';
 import type { ActionPlan, RunStepRecord } from '../../../shared/plan-runner/types';
-import type { PipelineProgress } from '../../../shared/pipeline-types';
 import {
   formatMetaTreePreview,
   formatPureTreePreview,
@@ -17,57 +20,70 @@ import {
 } from '../auth/oak-auth';
 import { MSG, type DomNode, type DomTreePayload } from '../types';
 import { InspectPanel } from './InspectPanel';
+import { formatProgressStatus } from './progress-status';
 import { ResumeUploadNote } from './ResumeUploadNote';
+import { sendMessage } from './runtime';
+import { useActiveTabId } from './use-active-tab';
+import { useTabSession } from './use-tab-session';
 import { WorkerPoolList, type OakWorkerJob } from './WorkerPoolList';
 import './SidebarApp.css';
 
-function sendMessage<T>(message: unknown): Promise<T> {
-  return new Promise((resolve, reject) => {
-    try {
-      chrome.runtime.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        resolve(response as T);
-      });
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
+type TabUi = {
+  lastFetch: DomTreePayload | null;
+  inspect: { title: string; content: string } | null;
+  fetching: boolean;
+};
 
-async function getActiveTabId(): Promise<number | null> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id ?? null;
-}
+const EMPTY_TAB_UI: TabUi = {
+  lastFetch: null,
+  inspect: null,
+  fetching: false,
+};
 
 export default function SidebarApp() {
+  const activeTabId = useActiveTabId();
+  const { tabJob, progress, attachments, setPipelines } = useTabSession(activeTabId);
+
   const [apiUrl, setApiUrl] = useState(DEFAULT_ATHENS_API_URL);
   const [session, setSession] = useState<OakStoredSession | null>(null);
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [fetching, setFetching] = useState(false);
-  const [status, setStatus] = useState('Ready');
-  const [lastFetch, setLastFetch] = useState<DomTreePayload | null>(null);
-  const [progress, setProgress] = useState<PipelineProgress>({
-    phase: 'idle',
-    message: 'Idle',
-  });
-  const [inspect, setInspect] = useState<{ title: string; content: string } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [tabUi, setTabUi] = useState<Record<string, TabUi>>({});
   const [workerJobs, setWorkerJobs] = useState<OakWorkerJob[]>([]);
   const [workerJobsLoading, setWorkerJobsLoading] = useState(false);
   const [workerJobsError, setWorkerJobsError] = useState<string | null>(null);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [openingJob, setOpeningJob] = useState(false);
   const [markingJobId, setMarkingJobId] = useState<string | null>(null);
 
+  const tabKey = activeTabId != null ? String(activeTabId) : null;
+  const ui = (tabKey && tabUi[tabKey]) || EMPTY_TAB_UI;
   const pipelineBusy =
     progress.phase === 'fetching' ||
     progress.phase === 'analyzing' ||
     progress.phase === 'running';
+
+  const patchTabUi = useCallback((tabId: number, patch: Partial<TabUi>) => {
+    setTabUi((prev) => {
+      const key = String(tabId);
+      return { ...prev, [key]: { ...(prev[key] ?? EMPTY_TAB_UI), ...patch } };
+    });
+  }, []);
+
+  const setTabProgress = useCallback(
+    (tabId: number, next: PipelineProgress) => {
+      setPipelines((prev) => {
+        const key = String(tabId);
+        return {
+          ...prev,
+          [key]: mergePipelineProgress(prev[key] ?? IDLE_PIPELINE_PROGRESS, next),
+        };
+      });
+    },
+    [setPipelines],
+  );
 
   useEffect(() => {
     void (async () => {
@@ -79,6 +95,10 @@ export default function SidebarApp() {
   useEffect(() => {
     void setAthensApiUrl(apiUrl);
   }, [apiUrl]);
+
+  useEffect(() => {
+    setNotice(null);
+  }, [activeTabId]);
 
   useEffect(() => {
     let alive = true;
@@ -100,56 +120,9 @@ export default function SidebarApp() {
     };
   }, [session, apiUrl]);
 
-  const applyPipelineProgress = useCallback((next: PipelineProgress) => {
-    const starting = next.phase === 'fetching';
-    setProgress((prev) => ({
-      ...prev,
-      ...next,
-      tree: starting ? next.tree : next.tree ?? prev.tree,
-      plan: starting ? next.plan : next.plan ?? prev.plan,
-      steps: starting ? next.steps ?? [] : next.steps ?? prev.steps,
-      resumeUpload: starting ? next.resumeUpload : next.resumeUpload ?? prev.resumeUpload,
-    }));
-    if (next.tree) {
-      setLastFetch({
-        url: next.tree.url,
-        title: next.tree.title,
-        tree: next.tree.tree as unknown as DomNode,
-        fetchedAt: next.tree.fetchedAt,
-      });
-    }
-    if (next.phase === 'idle') {
-      setStatus(next.message || 'Ready');
-      return;
-    }
-    const parts = [
-      next.message,
-      next.stepLabel ? `Step: ${next.stepLabel}` : null,
-      next.durationMs != null ? `Time: ${formatDuration(next.durationMs)}` : null,
-      next.usage
-        ? `AI: ${formatUsd(next.usage.costUsd)} · ${next.usage.totalTokens || 0} tok`
-        : null,
-      next.error ? `Error: ${next.error}` : null,
-    ].filter(Boolean);
-    setStatus(parts.join(' · '));
-  }, []);
-
-  useEffect(() => {
-    const onMessage = (message: {
-      type?: string;
-      tabId?: number;
-      progress?: PipelineProgress;
-    }) => {
-      if (message.type !== MSG.PIPELINE_PROGRESS || !message.progress) return;
-      applyPipelineProgress(message.progress);
-    };
-    chrome.runtime.onMessage.addListener(onMessage);
-    return () => chrome.runtime.onMessage.removeListener(onMessage);
-  }, [applyPipelineProgress]);
-
   const handleSignIn = async () => {
     setAuthBusy(true);
-    setStatus('Signing in…');
+    setNotice('Signing in…');
     try {
       const res = await sendMessage<{
         ok?: boolean;
@@ -166,9 +139,9 @@ export default function SidebarApp() {
       }
       setSession(res.session);
       setPassword('');
-      setStatus(`Signed in as ${res.session.displayName}`);
+      setNotice(`Signed in as ${res.session.displayName}`);
     } catch (err) {
-      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setAuthBusy(false);
     }
@@ -184,9 +157,9 @@ export default function SidebarApp() {
         throw new Error(res?.error || 'Sign out failed');
       }
       setSession(null);
-      setStatus('Signed out');
+      setNotice('Signed out');
     } catch (err) {
-      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setAuthBusy(false);
     }
@@ -217,54 +190,52 @@ export default function SidebarApp() {
     if (!session) {
       setWorkerJobs([]);
       setWorkerJobsError(null);
-      setSelectedJobId(null);
       return;
     }
-    void (async () => {
-      await fetchWorkerJobs();
+    void fetchWorkerJobs();
+  }, [session, fetchWorkerJobs]);
+
+  const openWorkerJob = useCallback(
+    async (job: OakWorkerJob) => {
+      setOpeningJob(true);
+      setNotice(`Opening ${job.title}…`);
       try {
         const res = await sendMessage<{
           ok?: boolean;
-          job?: { jobId?: string } | null;
-        }>({ type: MSG.GET_TAB_JOB });
-        if (res?.job?.jobId) setSelectedJobId(res.job.jobId);
-      } catch {
-        /* ignore */
+          error?: string;
+          tabId?: number;
+          reused?: boolean;
+        }>({
+          type: MSG.OPEN_WORKER_JOB,
+          tabId: activeTabId,
+          jobId: job.id,
+          applyUrl: job.applyUrl,
+          resumeId: job.recommendedResumeId,
+          resumeStack: job.recommendedResumeStack,
+          title: job.title,
+          company: job.company,
+        });
+        if (!res?.ok) {
+          throw new Error(res?.error || 'Failed to open job');
+        }
+        setNotice(
+          res.reused
+            ? `Switched to attached tab · ${job.company} — ${job.title}`
+            : `Attached this tab · ${job.company} — ${job.title}`,
+        );
+      } catch (err) {
+        setNotice(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setOpeningJob(false);
       }
-    })();
-  }, [session, fetchWorkerJobs]);
-
-  const openWorkerJob = useCallback(async (job: OakWorkerJob) => {
-    setOpeningJob(true);
-    setStatus(`Opening ${job.title}…`);
-    try {
-      const res = await sendMessage<{ ok?: boolean; error?: string }>({
-        type: MSG.OPEN_WORKER_JOB,
-        jobId: job.id,
-        applyUrl: job.applyUrl,
-        resumeId: job.recommendedResumeId,
-        resumeStack: job.recommendedResumeStack,
-        title: job.title,
-        company: job.company,
-      });
-      if (!res?.ok) {
-        throw new Error(res?.error || 'Failed to open job');
-      }
-      setSelectedJobId(job.id);
-      setStatus(`Opened ${job.company} — ${job.title}`);
-    } catch (err) {
-      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setOpeningJob(false);
-    }
-  }, []);
+    },
+    [activeTabId],
+  );
 
   const markJobApplied = useCallback(async (job: OakWorkerJob) => {
-    const wasSelected = selectedJobId === job.id;
     setMarkingJobId(job.id);
     setWorkerJobs((prev) => prev.filter((row) => row.id !== job.id));
-    if (wasSelected) setSelectedJobId(null);
-    setStatus(`Marking applied: ${job.company} — ${job.title}`);
+    setNotice(`Marking applied: ${job.company} — ${job.title}`);
     try {
       const res = await sendMessage<{ ok?: boolean; error?: string }>({
         type: MSG.MARK_JOB_APPLIED,
@@ -273,27 +244,24 @@ export default function SidebarApp() {
       if (!res?.ok) {
         throw new Error(res?.error || 'Failed to mark as applied');
       }
-      setStatus(`Marked applied: ${job.company} — ${job.title}`);
+      setNotice(`Marked applied: ${job.company} — ${job.title}`);
     } catch (err) {
       setWorkerJobs((prev) => {
         if (prev.some((row) => row.id === job.id)) return prev;
         return [job, ...prev];
       });
-      if (wasSelected) setSelectedJobId(job.id);
-      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setMarkingJobId(null);
     }
-  }, [selectedJobId]);
+  }, []);
 
   const startPipeline = useCallback(async () => {
-    if (pipelineBusy) return;
-    applyPipelineProgress({ phase: 'fetching', message: 'Starting…' });
+    const tabId = activeTabId;
+    if (pipelineBusy || tabId == null) return;
+    setTabProgress(tabId, { phase: 'fetching', message: 'Starting…' });
+    setNotice(null);
     try {
-      const tabId = await getActiveTabId();
-      if (!tabId) {
-        throw new Error('No active tab');
-      }
       const res = await sendMessage<{ ok?: boolean; error?: string }>({
         type: MSG.START_PIPELINE,
         tabId,
@@ -301,7 +269,7 @@ export default function SidebarApp() {
       if (res?.error) {
         const err = String(res.error);
         if (/sign in/i.test(err)) {
-          applyPipelineProgress({
+          setTabProgress(tabId, {
             phase: 'idle',
             message: 'Sign in to Athens to run Oak',
           });
@@ -310,42 +278,56 @@ export default function SidebarApp() {
         throw new Error(err);
       }
     } catch (err) {
-      applyPipelineProgress({
+      setTabProgress(tabId, {
         phase: 'error',
         message: 'Failed to start',
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [applyPipelineProgress, pipelineBusy]);
+  }, [activeTabId, pipelineBusy, setTabProgress]);
 
   const fetchDom = useCallback(async () => {
-    setFetching(true);
-    setStatus('Fetching DOM…');
+    const tabId = activeTabId;
+    if (tabId == null) return;
+    patchTabUi(tabId, { fetching: true });
+    setNotice('Fetching DOM…');
 
     try {
       const response = await sendMessage<DomTreePayload & { error?: string }>({
         type: MSG.FETCH_AND_EMIT_DOM,
+        tabId,
       });
 
       if (response?.error) {
-        setStatus(`Error: ${response.error}`);
+        setNotice(`Error: ${response.error}`);
         return;
       }
 
       if (!isValidTree(response?.tree)) {
-        setStatus('Error: invalid DOM tree received');
+        setNotice('Error: invalid DOM tree received');
         return;
       }
 
-      const payload: DomTreePayload = response;
-      setLastFetch(payload);
-      setStatus(`Sent ${countNodes(payload.tree)} nodes to UI board`);
+      patchTabUi(tabId, { lastFetch: response });
+      setNotice(`Sent ${countNodes(response.tree)} nodes to UI board`);
     } catch (err) {
-      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setFetching(false);
+      patchTabUi(tabId, { fetching: false });
     }
-  }, []);
+  }, [activeTabId, patchTabUi]);
+
+  const lastFetch = useMemo(() => {
+    if (ui.lastFetch && isValidTree(ui.lastFetch.tree)) return ui.lastFetch;
+    if (!progress.tree) return null;
+    return {
+      url: progress.tree.url,
+      title: progress.tree.title,
+      tree: progress.tree.tree as unknown as DomNode,
+      fetchedAt: progress.tree.fetchedAt,
+      tabId: activeTabId ?? undefined,
+    } satisfies DomTreePayload;
+  }, [ui.lastFetch, progress.tree, activeTabId]);
 
   const treeNode = lastFetch?.tree as unknown as DomTreeNode | undefined;
   const splitTrees = useMemo(() => {
@@ -365,28 +347,40 @@ export default function SidebarApp() {
   };
 
   const openPureTree = () => {
-    if (!splitTrees) return;
-    setInspect({
-      title: 'Pure Tree',
-      content: formatPureTreePreview(splitTrees.pure),
+    if (!splitTrees || activeTabId == null) return;
+    patchTabUi(activeTabId, {
+      inspect: {
+        title: 'Pure Tree',
+        content: formatPureTreePreview(splitTrees.pure),
+      },
     });
   };
 
   const openMetaTree = () => {
-    if (!splitTrees) return;
-    setInspect({
-      title: 'Meta Tree',
-      content: formatMetaTreePreview(splitTrees.meta, splitTrees.pure),
+    if (!splitTrees || activeTabId == null) return;
+    patchTabUi(activeTabId, {
+      inspect: {
+        title: 'Meta Tree',
+        content: formatMetaTreePreview(splitTrees.meta, splitTrees.pure),
+      },
     });
   };
 
   const openAiAnalyze = () => {
-    if (!plan) return;
-    setInspect({
-      title: 'AI Analyze',
-      content: JSON.stringify(plan, null, 2),
+    if (!plan || activeTabId == null) return;
+    patchTabUi(activeTabId, {
+      inspect: {
+        title: 'AI Analyze',
+        content: JSON.stringify(plan, null, 2),
+      },
     });
   };
+
+  const status = notice ?? formatProgressStatus(progress);
+  const boundResumeStack =
+    tabJob?.resumeStack ??
+    workerJobs.find((job) => job.id === tabJob?.jobId)?.recommendedResumeStack ??
+    null;
 
   return (
     <div className="sidebar-app">
@@ -395,7 +389,7 @@ export default function SidebarApp() {
         <p className="hint">
           Sign in, pick a Worker pool job like Athens Lens, then Fill the current page
           (Fetch → Analyze → Fill). Resume file inputs use the Library resume recommended
-          in Job Search.
+          in Job Search. Each tab keeps its own job, resume, and fill run.
         </p>
       </section>
 
@@ -473,7 +467,8 @@ export default function SidebarApp() {
           jobs={workerJobs}
           loading={workerJobsLoading}
           error={workerJobsError}
-          selectedJobId={selectedJobId}
+          selectedJobId={tabJob?.jobId ?? null}
+          attachments={attachments}
           opening={openingJob}
           markingJobId={markingJobId}
           onRefresh={() => void fetchWorkerJobs()}
@@ -484,11 +479,18 @@ export default function SidebarApp() {
 
       <section className="tools">
         <h3>Fill</h3>
+        {tabJob ? (
+          <p className="tab-job-chip">
+            This tab: <strong>{tabJob.company}</strong> — {tabJob.title}
+          </p>
+        ) : (
+          <p className="hint">No Worker pool job attached to this tab.</p>
+        )}
         <button
           type="button"
           className={`fill-card ${progress.phase}`}
           onClick={() => void startPipeline()}
-          disabled={pipelineBusy || !session}
+          disabled={pipelineBusy || !session || activeTabId == null}
         >
           <span className="tool-icon">▶</span>
           <span className="tool-label">
@@ -502,21 +504,18 @@ export default function SidebarApp() {
         </button>
         <ResumeUploadNote
           progress={progress}
-          boundStack={
-            workerJobs.find((job) => job.id === selectedJobId)?.recommendedResumeStack ??
-            null
-          }
-          hasBoundJob={Boolean(selectedJobId)}
+          boundStack={boundResumeStack}
+          hasBoundJob={Boolean(tabJob)}
         />
         <div className="tool-grid" style={{ marginTop: 8 }}>
           <button
             type="button"
             className="tool-card"
             onClick={() => void fetchDom()}
-            disabled={fetching || pipelineBusy || !connected || !session}
+            disabled={ui.fetching || pipelineBusy || !connected || !session || activeTabId == null}
           >
             <span className="tool-icon">⬡</span>
-            <span className="tool-label">{fetching ? 'Fetching…' : 'Fetch DOM'}</span>
+            <span className="tool-label">{ui.fetching ? 'Fetching…' : 'Fetch DOM'}</span>
           </button>
         </div>
       </section>
@@ -574,11 +573,13 @@ export default function SidebarApp() {
         </section>
       )}
 
-      {inspect && (
+      {ui.inspect && (
         <InspectPanel
-          title={inspect.title}
-          content={inspect.content}
-          onClose={() => setInspect(null)}
+          title={ui.inspect.title}
+          content={ui.inspect.content}
+          onClose={() => {
+            if (activeTabId != null) patchTabUi(activeTabId, { inspect: null });
+          }}
         />
       )}
 

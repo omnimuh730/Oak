@@ -524,6 +524,10 @@
   border-color: #7c6cf0;
 }
 
+.worker-pool-item.attached {
+  border-color: #3d4560;
+}
+
 .worker-pool-item.marking {
   opacity: 0.45;
 }
@@ -617,4 +621,16 @@
 
 .worker-pool-resume:not(.muted) {
   color: #a5b4fc;
+}
+
+.worker-pool-tab {
+  font-size: 11px;
+  color: #c4b5fd;
+}
+
+.tab-job-chip {
+  font-size: 12px;
+  color: #c4b5fd;
+  line-height: 1.4;
+  margin-bottom: 10px;
 }

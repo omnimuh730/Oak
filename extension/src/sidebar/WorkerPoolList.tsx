@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { JobAttachment } from '../tab-job-session';
 
 export type OakWorkerJob = {
   id: string;
@@ -21,6 +22,7 @@ type WorkerPoolListProps = {
   loading: boolean;
   error: string | null;
   selectedJobId: string | null;
+  attachments: Record<string, JobAttachment>;
   opening: boolean;
   markingJobId: string | null;
   onRefresh: () => void;
@@ -65,6 +67,7 @@ export function WorkerPoolList({
   loading,
   error,
   selectedJobId,
+  attachments,
   opening,
   markingJobId,
   onRefresh,
@@ -99,17 +102,25 @@ export function WorkerPoolList({
         {jobs.map((job) => {
           const selected = selectedJobId === job.id;
           const marking = markingJobId === job.id;
+          const attached = attachments[job.id];
+          const openTitle = attached?.active
+            ? 'Already attached to this tab'
+            : attached
+              ? 'Switch to the attached tab'
+              : job.applyUrl
+                ? 'Open apply page and attach this tab'
+                : 'No apply URL';
           return (
             <div
               key={job.id}
-              className={`worker-pool-item${selected ? ' selected' : ''}${marking ? ' marking' : ''}`}
+              className={`worker-pool-item${selected ? ' selected' : ''}${attached && !selected ? ' attached' : ''}${marking ? ' marking' : ''}`}
             >
               <button
                 type="button"
                 className="worker-pool-open"
                 disabled={opening || marking || !job.applyUrl}
                 aria-current={selected ? 'page' : undefined}
-                title={job.applyUrl ? 'Open apply page in this tab' : 'No apply URL'}
+                title={openTitle}
                 onClick={() => onOpen(job)}
               >
                 <CompanyMark company={job.company} logoUrl={job.companyLogoUrl} />
@@ -127,6 +138,11 @@ export function WorkerPoolList({
                   ) : (
                     <span className="worker-pool-resume muted">No resume assigned</span>
                   )}
+                  {attached?.active ? (
+                    <span className="worker-pool-tab">Attached to this tab</span>
+                  ) : attached ? (
+                    <span className="worker-pool-tab">Attached to another tab</span>
+                  ) : null}
                 </span>
               </button>
               <button

@@ -27,6 +27,7 @@ import {
 export type PipelineEmit = (progress: PipelineProgress) => void;
 
 export interface RunPipelineArgs {
+  /** Pinned at Fill click. DOM fetch and every plan step target this tab, even if the user focuses another. */
   tabId: number;
   preferredFrameId?: number | null;
   aiServerUrl?: string;

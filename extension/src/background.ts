@@ -11,8 +11,14 @@ import {
 } from './auth/oak-auth';
 import { runFabPipeline } from './pipeline/run-pipeline';
 import { addPipelineUsage } from './pipeline/usage-tracker';
+import { openWorkerJobInTab } from './open-worker-job';
 import { sendPlanStepToTab } from './tab-messaging';
-import { bindTabJob, getTabJob, unbindTabJob } from './tab-job-session';
+import {
+  getTabJob,
+  unbindJobFromAllTabs,
+  unbindTabJob,
+} from './tab-job-session';
+import { clearTabPipeline, queueTabPipeline } from './tab-pipeline-session';
 import {
   MSG,
   type DomTreePayload,
@@ -37,18 +43,30 @@ function enableSidePanelOnActionClick(): void {
     });
 }
 
-async function resolvePipelineTabId(
+/** Tab the caller pinned. Never the currently focused tab — Fill must stay on the tab that was active at click. */
+function pinnedTabId(
+  requestedTabId: unknown,
+  sender: chrome.runtime.MessageSender,
+): number | null {
+  if (typeof requestedTabId === 'number' && Number.isFinite(requestedTabId)) {
+    return requestedTabId;
+  }
+  return sender.tab?.id ?? null;
+}
+
+async function resolvePreferredTabId(
   sender: chrome.runtime.MessageSender,
   requestedTabId: unknown,
 ): Promise<number | null> {
-  if (sender.tab?.id) return sender.tab.id;
-  if (typeof requestedTabId === 'number') return requestedTabId;
+  const pinned = pinnedTabId(requestedTabId, sender);
+  if (pinned != null) return pinned;
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab?.id ?? null;
 }
 
 function broadcastPipelineProgress(tabId: number, progress: PipelineProgress): void {
   socket?.emit('pipeline:progress', { tabId, progress });
+  void queueTabPipeline(tabId, progress);
   chrome.runtime.sendMessage(
     { type: MSG.PIPELINE_PROGRESS, tabId, progress },
     () => {
@@ -175,6 +193,7 @@ chrome.runtime.onInstalled.addListener(enableSidePanelOnActionClick);
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void unbindTabJob(tabId);
+  void clearTabPipeline(tabId);
 });
 
 chrome.storage.onChanged.addListener((changes) => {
@@ -299,30 +318,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error: 'This job has no apply URL' });
           return;
         }
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
+        const preferredTabId = await resolvePreferredTabId(sender, message.tabId);
+        const opened = await openWorkerJobInTab({
+          preferredTabId,
+          job: {
+            jobId,
+            resumeId:
+              typeof message.resumeId === 'string' && message.resumeId.trim()
+                ? message.resumeId.trim()
+                : null,
+            resumeStack:
+              typeof message.resumeStack === 'string' && message.resumeStack.trim()
+                ? message.resumeStack.trim()
+                : null,
+            applyUrl,
+            title: String(message.title || ''),
+            company: String(message.company || ''),
+          },
         });
-        if (!tab?.id) {
-          sendResponse({ ok: false, error: 'No active tab' });
-          return;
-        }
-        await bindTabJob(tab.id, {
-          jobId,
-          resumeId:
-            typeof message.resumeId === 'string' && message.resumeId.trim()
-              ? message.resumeId.trim()
-              : null,
-          resumeStack:
-            typeof message.resumeStack === 'string' && message.resumeStack.trim()
-              ? message.resumeStack.trim()
-              : null,
-          applyUrl,
-          title: String(message.title || ''),
-          company: String(message.company || ''),
-        });
-        await chrome.tabs.update(tab.id, { url: applyUrl });
-        sendResponse({ ok: true, tabId: tab.id });
+        sendResponse({ ok: true, tabId: opened.tabId, reused: opened.reused });
       } catch (err) {
         sendResponse({
           ok: false,
@@ -369,14 +383,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           return;
         }
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
-        if (tab?.id) {
-          const bound = await getTabJob(tab.id);
-          if (bound?.jobId === jobId) await unbindTabJob(tab.id);
-        }
+        await unbindJobFromAllTabs(jobId);
         sendResponse({ ok: true });
       } catch (err) {
         sendResponse({
@@ -417,7 +424,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === MSG.START_PIPELINE) {
     void (async () => {
-      const tabId = await resolvePipelineTabId(sender, message.tabId);
+      const tabId = pinnedTabId(message.tabId, sender);
       if (!tabId) {
         sendResponse({ error: 'No tab for pipeline' });
         return;
@@ -508,14 +515,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === MSG.FETCH_DOM || message.type === MSG.FETCH_AND_EMIT_DOM) {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      const tab = tabs[0];
-      if (!tab?.id) {
-        sendResponse({ error: 'No active tab' });
+    void (async () => {
+      const tabId = pinnedTabId(message.tabId, sender);
+      if (!tabId) {
+        sendResponse({ error: 'No tab for DOM fetch' });
         return;
       }
       try {
-        const result = await chrome.tabs.sendMessage(tab.id, { type: MSG.FETCH_DOM });
+        const result = await chrome.tabs.sendMessage(tabId, { type: MSG.FETCH_DOM });
 
         if (result?.error) {
           sendResponse({ error: result.error });
@@ -527,7 +534,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
-        const payload: DomTreePayload = { ...result, tabId: tab.id };
+        const payload: DomTreePayload = { ...result, tabId };
 
         if (message.type === MSG.FETCH_AND_EMIT_DOM) {
           socket?.emit('dom:tree', payload);
@@ -537,7 +544,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch (err) {
         sendResponse({ error: String(err) });
       }
-    });
+    })();
     return true;
   }
 });

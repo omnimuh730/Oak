@@ -45,3 +45,23 @@ export interface PipelineProgress {
     reason?: string | null;
   };
 }
+
+export const IDLE_PIPELINE_PROGRESS: PipelineProgress = {
+  phase: 'idle',
+  message: 'Idle',
+};
+
+export function mergePipelineProgress(
+  prev: PipelineProgress,
+  next: PipelineProgress,
+): PipelineProgress {
+  const starting = next.phase === 'fetching';
+  return {
+    ...prev,
+    ...next,
+    tree: starting ? next.tree : next.tree ?? prev.tree,
+    plan: starting ? next.plan : next.plan ?? prev.plan,
+    steps: starting ? next.steps ?? [] : next.steps ?? prev.steps,
+    resumeUpload: starting ? next.resumeUpload : next.resumeUpload ?? prev.resumeUpload,
+  };
+}
