@@ -24,9 +24,13 @@ export function ResumeUploadNote({
     text = `Will upload ${label || 'recommended resume'}`;
     tone = 'ready';
   } else if (ru?.status === 'skipped') {
-    text = ru.stack
-      ? `Skipped resume upload (${ru.stack}) — filling other fields`
-      : 'No recommended resume — skipped upload, filling other fields';
+    if (ru.stack && !ru.fileName) {
+      text = `Could not load the ${ru.stack} file — skipped upload, filling other fields`;
+    } else if (ru.stack) {
+      text = `Skipped resume upload (${ru.stack}) — filling other fields`;
+    } else {
+      text = 'No recommended resume — skipped upload, filling other fields';
+    }
     tone = 'skipped';
   } else if (hasBoundJob && boundStack) {
     text = `This tab will upload: ${boundStack}`;

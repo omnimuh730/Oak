@@ -183,7 +183,9 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
       phase: 'analyzing',
       message: recommendedResume
         ? `Analyzing ${nodeCount} nodes · resume ${recommendedResume.label || recommendedResume.name}`
-        : `Analyzing ${nodeCount} nodes…`,
+        : tabJob?.resumeStack
+          ? `Analyzing ${nodeCount} nodes · ${tabJob.resumeStack} file unavailable`
+          : `Analyzing ${nodeCount} nodes…`,
       tree: treeSnapshot,
       resumeUpload: resumeUpload(),
     });
