@@ -3,6 +3,7 @@
 export type PlanActionType =
   | 'fill'
   | 'upload'
+  | 'resume_upload'
   | 'select_radio'
   | 'wait'
   | 'validate'
@@ -12,6 +13,7 @@ export type PlanActionType =
 export type PlanStepActionType =
   | 'fill'
   | 'upload'
+  | 'resume_upload'
   | 'select_radio'
   | 'wait'
   | 'validate'

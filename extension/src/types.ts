@@ -43,6 +43,9 @@ export const MSG = {
   AUTH_STATUS: 'oak:auth-status',
   AUTH_SIGNIN: 'oak:auth-signin',
   AUTH_SIGNOUT: 'oak:auth-signout',
+  LIST_WORKER_JOBS: 'oak:list-worker-jobs',
+  OPEN_WORKER_JOB: 'oak:open-worker-job',
+  GET_TAB_JOB: 'oak:get-tab-job',
   DEBUG_LOG: 'oak:debug-log',
 } as const;
 
@@ -66,6 +69,7 @@ export interface MatchOptionResponse {
 export type PlanStepActionType =
   | 'fill'
   | 'upload'
+  | 'resume_upload'
   | 'select_radio'
   | 'wait'
   | 'validate'

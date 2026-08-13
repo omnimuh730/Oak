@@ -17,6 +17,7 @@ import {
 } from '../auth/oak-auth';
 import { MSG, type DomNode, type DomTreePayload } from '../types';
 import { InspectPanel } from './InspectPanel';
+import { WorkerPoolList, type OakWorkerJob } from './WorkerPoolList';
 import './SidebarApp.css';
 
 function sendMessage<T>(message: unknown): Promise<T> {
@@ -54,6 +55,11 @@ export default function SidebarApp() {
     message: 'Idle',
   });
   const [inspect, setInspect] = useState<{ title: string; content: string } | null>(null);
+  const [workerJobs, setWorkerJobs] = useState<OakWorkerJob[]>([]);
+  const [workerJobsLoading, setWorkerJobsLoading] = useState(false);
+  const [workerJobsError, setWorkerJobsError] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [openingJob, setOpeningJob] = useState(false);
 
   const pipelineBusy =
     progress.phase === 'fetching' ||
@@ -175,6 +181,72 @@ export default function SidebarApp() {
     }
   };
 
+  const fetchWorkerJobs = useCallback(async () => {
+    setWorkerJobsLoading(true);
+    setWorkerJobsError(null);
+    try {
+      const res = await sendMessage<{
+        ok?: boolean;
+        error?: string;
+        jobs?: OakWorkerJob[];
+      }>({ type: MSG.LIST_WORKER_JOBS });
+      if (!res?.ok) {
+        throw new Error(res?.error || 'Failed to load Worker pool');
+      }
+      setWorkerJobs(Array.isArray(res.jobs) ? res.jobs : []);
+    } catch (err) {
+      setWorkerJobs([]);
+      setWorkerJobsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setWorkerJobsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setWorkerJobs([]);
+      setWorkerJobsError(null);
+      setSelectedJobId(null);
+      return;
+    }
+    void (async () => {
+      await fetchWorkerJobs();
+      try {
+        const res = await sendMessage<{
+          ok?: boolean;
+          job?: { jobId?: string } | null;
+        }>({ type: MSG.GET_TAB_JOB });
+        if (res?.job?.jobId) setSelectedJobId(res.job.jobId);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [session, fetchWorkerJobs]);
+
+  const openWorkerJob = useCallback(async (job: OakWorkerJob) => {
+    setOpeningJob(true);
+    setStatus(`Opening ${job.title}…`);
+    try {
+      const res = await sendMessage<{ ok?: boolean; error?: string }>({
+        type: MSG.OPEN_WORKER_JOB,
+        jobId: job.id,
+        applyUrl: job.applyUrl,
+        resumeId: job.recommendedResumeId,
+        title: job.title,
+        company: job.company,
+      });
+      if (!res?.ok) {
+        throw new Error(res?.error || 'Failed to open job');
+      }
+      setSelectedJobId(job.id);
+      setStatus(`Opened ${job.company} — ${job.title}`);
+    } catch (err) {
+      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setOpeningJob(false);
+    }
+  }, []);
+
   const fetchDom = useCallback(async () => {
     setFetching(true);
     setStatus('Fetching DOM…');
@@ -250,8 +322,9 @@ export default function SidebarApp() {
       <section className="welcome">
         <h2>Oak</h2>
         <p className="hint">
-          Sign in, then Fill the current page (Fetch → Analyze → Fill). Inspect the captured
-          trees, AI plan, and step results here.
+          Sign in, pick a Worker pool job like Athens Lens, then Fill the current page
+          (Fetch → Analyze → Fill). Resume file inputs use the Library resume recommended
+          in Job Search.
         </p>
       </section>
 
@@ -323,6 +396,18 @@ export default function SidebarApp() {
               : 'Sign in to connect'}
         </div>
       </section>
+
+      {session ? (
+        <WorkerPoolList
+          jobs={workerJobs}
+          loading={workerJobsLoading}
+          error={workerJobsError}
+          selectedJobId={selectedJobId}
+          opening={openingJob}
+          onRefresh={() => void fetchWorkerJobs()}
+          onOpen={(job) => void openWorkerJob(job)}
+        />
+      ) : null}
 
       <section className="tools">
         <h3>Fill</h3>

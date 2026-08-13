@@ -22,6 +22,7 @@ export interface RunPlanOptions {
   extensionId?: string;
   frameId?: number | null;
   runtimeFile: RuntimeAttachedFile | null;
+  recommendedResume?: RuntimeAttachedFile | null;
   hooks: OrchestratorHooks;
 }
 
@@ -57,11 +58,12 @@ function emitPlanStep(
 }
 
 export async function runActionPlan(options: RunPlanOptions): Promise<RunReport> {
-  const { plan, socket, tabId, url, extensionId, frameId, runtimeFile, hooks } = options;
+  const { plan, socket, tabId, url, extensionId, frameId, runtimeFile, recommendedResume, hooks } = options;
 
   const sharedOptions: SharedRunPlanOptions = {
     plan,
     runtimeFile,
+    recommendedResume: recommendedResume ?? null,
     hooks,
     executeStep: (step) =>
       emitPlanStep(socket, { tabId, url, extensionId, frameId, step }),

@@ -338,6 +338,7 @@ export default function App() {
         extensionId: latestTree.meta?.from,
         frameId: latestTree.meta?.frameId ?? latestTree.frameId ?? null,
         runtimeFile,
+        recommendedResume: null,
         hooks: {
           onSteps: setPlanRunSteps,
           onPause: requestPauseDecision,

@@ -91,3 +91,32 @@ export async function fetchRuntimeFile(
   }
   return data.file ?? null;
 }
+
+export async function fetchRecommendedResume(
+  jobId: string,
+  _apiUrl?: string,
+): Promise<RuntimeAttachedFile | null> {
+  const id = String(jobId || '').trim();
+  if (!id) return null;
+  const base = (_apiUrl || (await getAthensApiUrl())).replace(/\/$/, '');
+  const res = await fetch(
+    `${base}/api/oak/jobs/${encodeURIComponent(id)}/recommended-resume`,
+    { headers: await authHeaders() },
+  );
+  const data = (await res.json().catch(() => ({}))) as {
+    file?: RuntimeAttachedFile;
+    error?: string;
+    message?: string;
+  };
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error(
+      typeof data.error === 'string'
+        ? data.error
+        : typeof data.message === 'string'
+          ? data.message
+          : `Recommended resume failed: ${res.status}`,
+    );
+  }
+  return data.file ?? null;
+}

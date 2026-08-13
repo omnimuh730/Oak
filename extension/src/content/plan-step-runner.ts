@@ -2,6 +2,7 @@ import { MSG, type PlanStepPayload, type PlanStepResult } from '../types';
 import { controlAlreadyMatches } from './agents/already-filled';
 import { fillElement } from './agents/fill';
 import { readControlValue } from './agents/read-control-value';
+import { resumeUpload } from './agents/resume-upload';
 import { selectRadioElement } from './agents/select-radio';
 import { uploadFileToElement } from './agents/upload';
 import { validateElementIndexes } from './agents/validate';
@@ -125,7 +126,7 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
 
   // Resume / browser autofill may already populate the control — don't overwrite
   // when the live value already matches the planned answer.
-  if (step.action === 'fill' || step.action === 'select_radio' || step.action === 'upload') {
+  if (step.action === 'fill' || step.action === 'select_radio' || step.action === 'upload' || step.action === 'resume_upload') {
     const prior = controlAlreadyMatches(verified.element, step.value, {
       fileName: step.file?.name ?? null,
     });
@@ -192,6 +193,13 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
           throw new Error('upload requires runtime file payload');
         }
         valueAfter = await uploadFileToElement(verified.element, step.file);
+        break;
+      }
+      case 'resume_upload': {
+        if (!step.file?.base64) {
+          throw new Error('resume_upload requires the recommended Library resume');
+        }
+        valueAfter = await resumeUpload(verified.element, step.file);
         break;
       }
       case 'select_radio': {

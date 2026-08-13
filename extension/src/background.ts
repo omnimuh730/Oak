@@ -12,6 +12,7 @@ import {
 import { runFabPipeline } from './pipeline/run-pipeline';
 import { addPipelineUsage } from './pipeline/usage-tracker';
 import { sendPlanStepToTab } from './tab-messaging';
+import { bindTabJob, getTabJob, unbindTabJob } from './tab-job-session';
 import {
   MSG,
   type DomTreePayload,
@@ -160,6 +161,10 @@ async function connectSocket() {
 
 void connectSocket();
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void unbindTabJob(tabId);
+});
+
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.athensApiUrl || changes.oakSession) {
     void connectSocket();
@@ -236,6 +241,109 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    })();
+    return true;
+  }
+
+  if (message.type === MSG.LIST_WORKER_JOBS) {
+    void (async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) {
+          sendResponse({ ok: false, error: 'Sign in required', jobs: [] });
+          return;
+        }
+        const base = await getAthensApiUrl();
+        const res = await fetch(`${base}/api/oak/jobs`, {
+          headers: await authHeaders(),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          jobs?: unknown[];
+          message?: string;
+          error?: string;
+        };
+        if (!res.ok) {
+          sendResponse({
+            ok: false,
+            error: data.message || data.error || `Jobs failed (${res.status})`,
+            jobs: [],
+          });
+          return;
+        }
+        sendResponse({ ok: true, jobs: Array.isArray(data.jobs) ? data.jobs : [] });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+          jobs: [],
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === MSG.OPEN_WORKER_JOB) {
+    void (async () => {
+      try {
+        const applyUrl = String(message.applyUrl || '').trim();
+        const jobId = String(message.jobId || '').trim();
+        if (!jobId) {
+          sendResponse({ ok: false, error: 'Missing job id' });
+          return;
+        }
+        if (!applyUrl) {
+          sendResponse({ ok: false, error: 'This job has no apply URL' });
+          return;
+        }
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        if (!tab?.id) {
+          sendResponse({ ok: false, error: 'No active tab' });
+          return;
+        }
+        await bindTabJob(tab.id, {
+          jobId,
+          resumeId:
+            typeof message.resumeId === 'string' && message.resumeId.trim()
+              ? message.resumeId.trim()
+              : null,
+          applyUrl,
+          title: String(message.title || ''),
+          company: String(message.company || ''),
+        });
+        await chrome.tabs.update(tab.id, { url: applyUrl });
+        sendResponse({ ok: true, tabId: tab.id });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message.type === MSG.GET_TAB_JOB) {
+    void (async () => {
+      let tabId =
+        typeof message.tabId === 'number'
+          ? message.tabId
+          : sender.tab?.id ?? null;
+      if (!tabId) {
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        tabId = tab?.id ?? null;
+      }
+      if (!tabId) {
+        sendResponse({ ok: false, job: null });
+        return;
+      }
+      sendResponse({ ok: true, job: await getTabJob(tabId) });
     })();
     return true;
   }

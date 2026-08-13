@@ -1,4 +1,10 @@
 import { collectForbiddenIndexes, targetsForbiddenIndex } from './forbidden';
+import {
+  isExecutableStep,
+  missingUploadReason,
+  resolveStepFile,
+  type PlanStepFiles,
+} from './step-file';
 import type {
   ActionPlan,
   PauseDecision,
@@ -22,24 +28,15 @@ export interface RunPlanOptions {
   /** Execute one plan step against the live page (socket or direct tab message). */
   executeStep: (step: PlanStepPayload) => Promise<PlanStepResult>;
   runtimeFile: RuntimeAttachedFile | null;
+  /** Library resume assigned by Job Search Recommend. */
+  recommendedResume?: RuntimeAttachedFile | null;
   hooks: OrchestratorHooks;
-}
-
-function isExecutableStep(action: PlanAction['action']): boolean {
-  return (
-    action === 'fill' ||
-    action === 'upload' ||
-    action === 'select_radio' ||
-    action === 'wait' ||
-    action === 'validate'
-  );
 }
 
 function toStepPayload(
   action: PlanAction,
-  runtimeFile: RuntimeAttachedFile | null,
+  files: PlanStepFiles,
 ): PlanStepPayload {
-  const needsFile = action.action === 'upload';
   return {
     action: action.action as PlanStepActionType,
     element_index: action.element_index,
@@ -47,7 +44,7 @@ function toStepPayload(
     expected_label: action.expected_label,
     expected_role: action.expected_role,
     value: action.value,
-    file: needsFile ? runtimeFile : null,
+    file: resolveStepFile(action, files),
     ms: action.ms,
   };
 }
@@ -63,7 +60,14 @@ function summarize(steps: RunStepRecord[]): RunReport['summary'] {
 }
 
 export async function runActionPlan(options: RunPlanOptions): Promise<RunReport> {
-  const { plan, executeStep, runtimeFile, hooks } = options;
+  const {
+    plan,
+    executeStep,
+    runtimeFile,
+    recommendedResume = null,
+    hooks,
+  } = options;
+  const files: PlanStepFiles = { runtimeFile, recommendedResume };
   const forbidden = collectForbiddenIndexes(plan);
   const stopBeforeSubmit = plan.validation?.stop_before_submit !== false;
 
@@ -182,13 +186,14 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
       continue;
     }
 
-    if (action.action === 'upload' && !runtimeFile) {
+    const missingFile = missingUploadReason(action, files);
+    if (missingFile) {
       const decision = await hooks.onPause({
         index: i,
         action: action.action,
         element_index: action.element_index,
         expected_label: action.expected_label,
-        reason: 'Upload requires FILE_PATH runtime file, but none was loaded',
+        reason: missingFile,
         kind: 'error',
       });
       if (decision === 'abort') {
@@ -208,11 +213,11 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
     let done = false;
     while (!done && !aborted) {
       try {
-        if (action.action === 'upload' && !runtimeFile) {
-          throw new Error('Upload requires FILE_PATH runtime file');
+        if (missingFile) {
+          throw new Error(missingFile);
         }
 
-        const result = await executeStep(toStepPayload(action, runtimeFile));
+        const result = await executeStep(toStepPayload(action, files));
 
         if (result.ok) {
           if (result.alreadyFilled) {

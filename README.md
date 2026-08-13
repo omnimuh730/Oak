@@ -76,7 +76,9 @@ npm run build -w extension
 
 1. Visit any website
 2. Click the Oak toolbar icon to open the sidebar
-3. Sign in, then **Fill page** — Fetch → Analyze → Fill (same pipeline as the old FAB)
+3. Sign in — Worker pool jobs appear in a Lens-style list
+4. Click a job to open its apply URL in the current tab (bound to that tab for Fill)
+5. **Fill page** — Fetch → Analyze → Fill. When the AI marks a resume/CV file input, Oak uploads the Library resume recommended for that job in Job Search.
 4. In the sidebar: **Pure Tree**, **Meta Tree**, **AI Analyze**, and the plan-run step list (verified / skipped)
 5. **Fetch DOM** still sends a snapshot to the UI board if you want the desktop board
 
@@ -91,6 +93,8 @@ npm run build -w extension
 | POST | `/api/oak/ai-analyze` | Bearer |
 | POST | `/api/oak/match-option` | Bearer |
 | GET | `/api/oak/runtime-file` | Bearer |
+| GET | `/api/oak/jobs` | Bearer — Worker Pool jobs |
+| GET | `/api/oak/jobs/:jobId/recommended-resume` | Bearer — Library resume assigned in Job Search |
 
 Socket.io: same host, path `/oak`, handshake `auth.token` = access token.
 

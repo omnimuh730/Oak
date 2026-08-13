@@ -13,8 +13,9 @@ import {
   splitDomTree,
 } from '../../../shared/tree-export';
 import { sendPlanStepToTab, sendTabMessage } from '../tab-messaging';
+import { getTabJob } from '../tab-job-session';
 import { DEFAULT_AI_SERVER, MSG, type DomNode, type DomTreePayload } from '../types';
-import { fetchRuntimeFile, requestAiAnalyze } from './ai-client';
+import { fetchRecommendedResume, fetchRuntimeFile, requestAiAnalyze } from './ai-client';
 import {
   addPipelineUsage,
   beginPipelineUsageTracking,
@@ -200,11 +201,16 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     });
 
     const runtimeFile = await fetchRuntimeFile(aiServerUrl);
+    const tabJob = await getTabJob(tabId);
+    const recommendedResume = tabJob?.jobId
+      ? await fetchRecommendedResume(tabJob.jobId, aiServerUrl)
+      : null;
     const frameId = treePayload.frameId ?? preferredFrameId ?? null;
 
     const report = await runActionPlan({
       plan,
       runtimeFile,
+      recommendedResume,
       executeStep: async (step: PlanStepPayload) => {
         const res = await sendPlanStepToTab(tabId, step, frameId);
         const details = res.details ?? {};
