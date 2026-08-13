@@ -9,7 +9,7 @@ Chrome extension + React UI board for capturing page DOM trees, generating struc
 ```
 ┌─────────────────────┐   socket.io /oak    ┌──────────────────────┐
 │  Chrome Extension   │ ◄─────────────────► │  athens-backend      │
-│  (sidebar overlay)  │                     │  :8980               │
+│  (side panel)       │                     │  :8980               │
 └──────────┬──────────┘   HTTP /api/oak/*   └──────────┬───────────┘
            │ fetch DOM                                 │ broadcast
            ▼                                           ▼
@@ -26,7 +26,7 @@ Auth: Athens account username + password (`POST /api/oak/auth/signin`). AI Analy
 | Project | Path | Description |
 |---------|------|-------------|
 | UI Board | `ui-board/` | React app with DOM tree visualization + AI Analyze / Run |
-| Extension | `extension/` | Chrome MV3 extension with fill sidebar |
+| Extension | `extension/` | Chrome MV3 extension with native side panel |
 | Shared | `shared/` | Client-side plan/DOM types (not a Nest package) |
 
 ## Quick Start

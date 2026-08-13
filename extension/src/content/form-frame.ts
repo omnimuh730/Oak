@@ -34,8 +34,3 @@ export function isOakDomFrame(): boolean {
   if (window === window.top) return true;
   return formControlScore() >= MIN_CHILD_FORM_CONTROLS;
 }
-
-/** Overlay sidebar: top frame only (pipeline still selects the richest form frame). */
-export function shouldMountOakUi(): boolean {
-  return window === window.top;
-}

@@ -29,22 +29,32 @@ let socketConnected = false;
 /** Tabs with an in-flight FAB pipeline (parallel across tabs; one per tab). */
 const pipelineRunningTabIds = new Set<number>();
 
-async function broadcastPipelineProgress(tabId: number, progress: PipelineProgress): Promise<void> {
-  socket?.emit('pipeline:progress', { tabId, progress });
-
-  const message = { type: MSG.PIPELINE_PROGRESS, progress };
-  try {
-    const frames = await chrome.webNavigation.getAllFrames({ tabId });
-    for (const frame of frames ?? []) {
-      chrome.tabs.sendMessage(tabId, message, { frameId: frame.frameId }, () => {
-        void chrome.runtime.lastError;
-      });
-    }
-  } catch {
-    chrome.tabs.sendMessage(tabId, message, () => {
-      void chrome.runtime.lastError;
+function enableSidePanelOnActionClick(): void {
+  void chrome.sidePanel
+    .setPanelBehavior({ openPanelOnActionClick: true })
+    .catch((err) => {
+      console.warn('[Oak] side panel behavior:', err);
     });
-  }
+}
+
+async function resolvePipelineTabId(
+  sender: chrome.runtime.MessageSender,
+  requestedTabId: unknown,
+): Promise<number | null> {
+  if (sender.tab?.id) return sender.tab.id;
+  if (typeof requestedTabId === 'number') return requestedTabId;
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tab?.id ?? null;
+}
+
+function broadcastPipelineProgress(tabId: number, progress: PipelineProgress): void {
+  socket?.emit('pipeline:progress', { tabId, progress });
+  chrome.runtime.sendMessage(
+    { type: MSG.PIPELINE_PROGRESS, tabId, progress },
+    () => {
+      void chrome.runtime.lastError;
+    },
+  );
 }
 
 const KEEP_ALIVE_ALARM = 'oak-socket-keep-alive';
@@ -160,6 +170,8 @@ async function connectSocket() {
 }
 
 void connectSocket();
+enableSidePanelOnActionClick();
+chrome.runtime.onInstalled.addListener(enableSidePanelOnActionClick);
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void unbindTabJob(tabId);
@@ -168,15 +180,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.athensApiUrl || changes.oakSession) {
     void connectSocket();
-  }
-});
-
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.id) return;
-  try {
-    await chrome.tabs.sendMessage(tab.id, { type: MSG.TOGGLE_SIDEBAR });
-  } catch {
-    // Content script not loaded yet — reload the tab to inject it.
   }
 });
 
@@ -413,24 +416,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === MSG.START_PIPELINE) {
-    const tabId = sender.tab?.id;
-    if (!tabId) {
-      sendResponse({ error: 'No tab for pipeline' });
-      return true;
-    }
-    if (pipelineRunningTabIds.has(tabId)) {
-      sendResponse({ error: 'A pipeline is already running on this tab' });
-      return true;
-    }
-
-    pipelineRunningTabIds.add(tabId);
-    sendResponse({ ok: true });
-
     void (async () => {
+      const tabId = await resolvePipelineTabId(sender, message.tabId);
+      if (!tabId) {
+        sendResponse({ error: 'No tab for pipeline' });
+        return;
+      }
+      if (pipelineRunningTabIds.has(tabId)) {
+        sendResponse({ error: 'A pipeline is already running on this tab' });
+        return;
+      }
+
+      pipelineRunningTabIds.add(tabId);
+      sendResponse({ ok: true });
+
       try {
         const token = await getAccessToken();
         if (!token) {
-          await broadcastPipelineProgress(tabId, {
+          broadcastPipelineProgress(tabId, {
             phase: 'error',
             message: 'Sign in required',
             error: 'Sign in to Athens in the Oak sidebar first',
@@ -441,18 +444,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const apiUrl = await getAthensApiUrl();
         await runFabPipeline({
           tabId,
-          preferredFrameId: sender.frameId ?? null,
+          preferredFrameId: sender.tab ? sender.frameId ?? null : null,
           aiServerUrl: apiUrl,
           emitDomTree: (payload) => {
             socket?.emit('dom:tree', payload);
           },
           onProgress: (progress) => {
-            void broadcastPipelineProgress(tabId, progress);
+            broadcastPipelineProgress(tabId, progress);
           },
         });
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        await broadcastPipelineProgress(tabId, {
+        broadcastPipelineProgress(tabId, {
           phase: 'error',
           message: 'Failed',
           error,

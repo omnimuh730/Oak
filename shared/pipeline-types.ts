@@ -1,4 +1,4 @@
-/** One-click fill pipeline progress contract (extension ↔ sidebar overlay). */
+/** One-click fill pipeline progress contract (extension ↔ Chrome side panel). */
 
 import type { AiUsageSummary } from './ai-usage';
 import type { ActionPlan, RunStepRecord } from './plan-runner/types';

@@ -4,10 +4,7 @@ import { resolveElementByNodeId } from './element-resolver';
 import { executeActions, getElementContent } from './action-runner';
 import { formControlScore, isOakDomFrame } from './form-frame';
 import { clearHighlight, highlightElement } from './highlighter';
-import { injectOakUI } from './inject-ui';
 import { runPlanStep } from './plan-step-runner';
-
-injectOakUI();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.FETCH_DOM) {

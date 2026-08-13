@@ -32,7 +32,7 @@ export interface RunPipelineArgs {
   aiServerUrl?: string;
   /** Emit DOM tree to backend for UI board (optional socket emit callback). */
   emitDomTree?: (payload: DomTreePayload) => void;
-  /** Broadcast progress to the sidebar overlay + backend. */
+  /** Broadcast progress to the Chrome side panel + backend. */
   onProgress: PipelineEmit;
 }
 

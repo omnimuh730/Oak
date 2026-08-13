@@ -37,8 +37,9 @@ function sendMessage<T>(message: unknown): Promise<T> {
   });
 }
 
-function requestStartPipeline() {
-  window.parent.postMessage({ type: MSG.START_PIPELINE }, '*');
+async function getActiveTabId(): Promise<number | null> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab?.id ?? null;
 }
 
 export default function SidebarApp() {
@@ -99,45 +100,52 @@ export default function SidebarApp() {
     };
   }, [session, apiUrl]);
 
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (event.data?.type !== MSG.PIPELINE_PROGRESS || !event.data.progress) return;
-      const next = event.data.progress as PipelineProgress;
-      const starting = next.phase === 'fetching';
-      setProgress((prev) => ({
-        ...prev,
-        ...next,
-        tree: starting ? next.tree : next.tree ?? prev.tree,
-        plan: starting ? next.plan : next.plan ?? prev.plan,
-        steps: starting ? next.steps ?? [] : next.steps ?? prev.steps,
-        resumeUpload: starting ? next.resumeUpload : next.resumeUpload ?? prev.resumeUpload,
-      }));
-      if (next.tree) {
-        setLastFetch({
-          url: next.tree.url,
-          title: next.tree.title,
-          tree: next.tree.tree as unknown as DomNode,
-          fetchedAt: next.tree.fetchedAt,
-        });
-      }
-      if (next.phase === 'idle') {
-        setStatus(next.message || 'Ready');
-        return;
-      }
-      const parts = [
-        next.message,
-        next.stepLabel ? `Step: ${next.stepLabel}` : null,
-        next.durationMs != null ? `Time: ${formatDuration(next.durationMs)}` : null,
-        next.usage
-          ? `AI: ${formatUsd(next.usage.costUsd)} · ${next.usage.totalTokens || 0} tok`
-          : null,
-        next.error ? `Error: ${next.error}` : null,
-      ].filter(Boolean);
-      setStatus(parts.join(' · '));
-    };
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+  const applyPipelineProgress = useCallback((next: PipelineProgress) => {
+    const starting = next.phase === 'fetching';
+    setProgress((prev) => ({
+      ...prev,
+      ...next,
+      tree: starting ? next.tree : next.tree ?? prev.tree,
+      plan: starting ? next.plan : next.plan ?? prev.plan,
+      steps: starting ? next.steps ?? [] : next.steps ?? prev.steps,
+      resumeUpload: starting ? next.resumeUpload : next.resumeUpload ?? prev.resumeUpload,
+    }));
+    if (next.tree) {
+      setLastFetch({
+        url: next.tree.url,
+        title: next.tree.title,
+        tree: next.tree.tree as unknown as DomNode,
+        fetchedAt: next.tree.fetchedAt,
+      });
+    }
+    if (next.phase === 'idle') {
+      setStatus(next.message || 'Ready');
+      return;
+    }
+    const parts = [
+      next.message,
+      next.stepLabel ? `Step: ${next.stepLabel}` : null,
+      next.durationMs != null ? `Time: ${formatDuration(next.durationMs)}` : null,
+      next.usage
+        ? `AI: ${formatUsd(next.usage.costUsd)} · ${next.usage.totalTokens || 0} tok`
+        : null,
+      next.error ? `Error: ${next.error}` : null,
+    ].filter(Boolean);
+    setStatus(parts.join(' · '));
   }, []);
+
+  useEffect(() => {
+    const onMessage = (message: {
+      type?: string;
+      tabId?: number;
+      progress?: PipelineProgress;
+    }) => {
+      if (message.type !== MSG.PIPELINE_PROGRESS || !message.progress) return;
+      applyPipelineProgress(message.progress);
+    };
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => chrome.runtime.onMessage.removeListener(onMessage);
+  }, [applyPipelineProgress]);
 
   const handleSignIn = async () => {
     setAuthBusy(true);
@@ -277,6 +285,38 @@ export default function SidebarApp() {
       setMarkingJobId(null);
     }
   }, [selectedJobId]);
+
+  const startPipeline = useCallback(async () => {
+    if (pipelineBusy) return;
+    applyPipelineProgress({ phase: 'fetching', message: 'Starting…' });
+    try {
+      const tabId = await getActiveTabId();
+      if (!tabId) {
+        throw new Error('No active tab');
+      }
+      const res = await sendMessage<{ ok?: boolean; error?: string }>({
+        type: MSG.START_PIPELINE,
+        tabId,
+      });
+      if (res?.error) {
+        const err = String(res.error);
+        if (/sign in/i.test(err)) {
+          applyPipelineProgress({
+            phase: 'idle',
+            message: 'Sign in to Athens to run Oak',
+          });
+          return;
+        }
+        throw new Error(err);
+      }
+    } catch (err) {
+      applyPipelineProgress({
+        phase: 'error',
+        message: 'Failed to start',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [applyPipelineProgress, pipelineBusy]);
 
   const fetchDom = useCallback(async () => {
     setFetching(true);
@@ -447,7 +487,7 @@ export default function SidebarApp() {
         <button
           type="button"
           className={`fill-card ${progress.phase}`}
-          onClick={() => requestStartPipeline()}
+          onClick={() => void startPipeline()}
           disabled={pipelineBusy || !session}
         >
           <span className="tool-icon">▶</span>
