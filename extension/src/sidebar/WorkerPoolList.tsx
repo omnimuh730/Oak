@@ -103,13 +103,9 @@ export function WorkerPoolList({
           const selected = selectedJobId === job.id;
           const marking = markingJobId === job.id;
           const attached = attachments[job.id];
-          const openTitle = attached?.active
-            ? 'Already attached to this tab'
-            : attached
-              ? 'Switch to the attached tab'
-              : job.applyUrl
-                ? 'Open apply page and attach this tab'
-                : 'No apply URL';
+          const openTitle = job.applyUrl
+            ? 'Open apply page in a new tab'
+            : 'No apply URL';
           return (
             <div
               key={job.id}

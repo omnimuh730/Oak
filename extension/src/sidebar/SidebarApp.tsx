@@ -218,11 +218,7 @@ export default function SidebarApp() {
         if (!res?.ok) {
           throw new Error(res?.error || 'Failed to open job');
         }
-        setNotice(
-          res.reused
-            ? `Switched to attached tab · ${job.company} — ${job.title}`
-            : `Attached this tab · ${job.company} — ${job.title}`,
-        );
+        setNotice(`Opened new tab · ${job.company} — ${job.title}`);
       } catch (err) {
         setNotice(`Error: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
