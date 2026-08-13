@@ -507,17 +507,16 @@
 .worker-pool-item {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  gap: 10px;
-  text-align: left;
-  padding: 10px 12px;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px 4px 4px 0;
   background: #242836;
   border-radius: 10px;
   color: #e8eaef;
   border: 1px solid transparent;
 }
 
-.worker-pool-item:not(:disabled):hover {
+.worker-pool-item:hover {
   background: #2e3344;
 }
 
@@ -525,7 +524,49 @@
   border-color: #7c6cf0;
 }
 
-.worker-pool-item:disabled {
+.worker-pool-item.marking {
+  opacity: 0.45;
+}
+
+.worker-pool-open {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 6px 8px 6px 12px;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-radius: 8px;
+}
+
+.worker-pool-open:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.worker-pool-applied {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  margin: 4px 4px 4px 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8b92a5;
+  border: 0;
+}
+
+.worker-pool-applied:not(:disabled):hover {
+  background: #1f6f4a;
+  color: #e8f8ef;
+}
+
+.worker-pool-applied:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }

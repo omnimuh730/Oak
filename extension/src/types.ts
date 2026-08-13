@@ -45,6 +45,7 @@ export const MSG = {
   AUTH_SIGNOUT: 'oak:auth-signout',
   LIST_WORKER_JOBS: 'oak:list-worker-jobs',
   OPEN_WORKER_JOB: 'oak:open-worker-job',
+  MARK_JOB_APPLIED: 'oak:mark-job-applied',
   GET_TAB_JOB: 'oak:get-tab-job',
   DEBUG_LOG: 'oak:debug-log',
 } as const;

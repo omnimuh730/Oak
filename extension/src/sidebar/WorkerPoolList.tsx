@@ -22,8 +22,10 @@ type WorkerPoolListProps = {
   error: string | null;
   selectedJobId: string | null;
   opening: boolean;
+  markingJobId: string | null;
   onRefresh: () => void;
   onOpen: (job: OakWorkerJob) => void;
+  onMarkApplied: (job: OakWorkerJob) => void;
 };
 
 function CompanyMark({ company, logoUrl }: { company: string; logoUrl?: string }) {
@@ -47,14 +49,27 @@ function CompanyMark({ company, logoUrl }: { company: string; logoUrl?: string }
   );
 }
 
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M7.7 13.3 4.4 10l-1.4 1.4 4.7 4.7 10-10L16.3 4.7z"
+      />
+    </svg>
+  );
+}
+
 export function WorkerPoolList({
   jobs,
   loading,
   error,
   selectedJobId,
   opening,
+  markingJobId,
   onRefresh,
   onOpen,
+  onMarkApplied,
 }: WorkerPoolListProps) {
   return (
     <section className="worker-pool">
@@ -69,7 +84,7 @@ export function WorkerPoolList({
           type="button"
           className="tool-card worker-pool-refresh"
           onClick={onRefresh}
-          disabled={loading || opening}
+          disabled={loading || opening || Boolean(markingJobId)}
         >
           Refresh
         </button>
@@ -83,33 +98,48 @@ export function WorkerPoolList({
       <nav className="worker-pool-list" aria-label="Worker pool jobs">
         {jobs.map((job) => {
           const selected = selectedJobId === job.id;
+          const marking = markingJobId === job.id;
           return (
-            <button
+            <div
               key={job.id}
-              type="button"
-              className={`worker-pool-item${selected ? ' selected' : ''}`}
-              disabled={opening || !job.applyUrl}
-              aria-current={selected ? 'page' : undefined}
-              title={job.applyUrl ? 'Open apply page in this tab' : 'No apply URL'}
-              onClick={() => onOpen(job)}
+              className={`worker-pool-item${selected ? ' selected' : ''}${marking ? ' marking' : ''}`}
             >
-              <CompanyMark company={job.company} logoUrl={job.companyLogoUrl} />
-              <span className="job-list-copy">
-                <strong className="worker-pool-title">{job.title}</strong>
-                <span className="worker-pool-meta">{job.company}</span>
-                <span className="worker-pool-location">
-                  {job.location}
-                  {job.workMode ? ` · ${job.workMode}` : ''}
-                </span>
-                {job.recommendedResumeStack || job.recommendedResumeId ? (
-                  <span className="worker-pool-resume">
-                    Resume: {job.recommendedResumeStack || 'assigned'}
+              <button
+                type="button"
+                className="worker-pool-open"
+                disabled={opening || marking || !job.applyUrl}
+                aria-current={selected ? 'page' : undefined}
+                title={job.applyUrl ? 'Open apply page in this tab' : 'No apply URL'}
+                onClick={() => onOpen(job)}
+              >
+                <CompanyMark company={job.company} logoUrl={job.companyLogoUrl} />
+                <span className="job-list-copy">
+                  <strong className="worker-pool-title">{job.title}</strong>
+                  <span className="worker-pool-meta">{job.company}</span>
+                  <span className="worker-pool-location">
+                    {job.location}
+                    {job.workMode ? ` · ${job.workMode}` : ''}
                   </span>
-                ) : (
-                  <span className="worker-pool-resume muted">No resume assigned</span>
-                )}
-              </span>
-            </button>
+                  {job.recommendedResumeStack || job.recommendedResumeId ? (
+                    <span className="worker-pool-resume">
+                      Resume: {job.recommendedResumeStack || 'assigned'}
+                    </span>
+                  ) : (
+                    <span className="worker-pool-resume muted">No resume assigned</span>
+                  )}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="worker-pool-applied"
+                disabled={opening || marking}
+                title="Mark as applied"
+                aria-label={`Mark ${job.title} as applied`}
+                onClick={() => onMarkApplied(job)}
+              >
+                <CheckIcon />
+              </button>
+            </div>
           );
         })}
       </nav>

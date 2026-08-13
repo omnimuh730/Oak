@@ -61,6 +61,7 @@ export default function SidebarApp() {
   const [workerJobsError, setWorkerJobsError] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [openingJob, setOpeningJob] = useState(false);
+  const [markingJobId, setMarkingJobId] = useState<string | null>(null);
 
   const pipelineBusy =
     progress.phase === 'fetching' ||
@@ -250,6 +251,33 @@ export default function SidebarApp() {
     }
   }, []);
 
+  const markJobApplied = useCallback(async (job: OakWorkerJob) => {
+    const wasSelected = selectedJobId === job.id;
+    setMarkingJobId(job.id);
+    setWorkerJobs((prev) => prev.filter((row) => row.id !== job.id));
+    if (wasSelected) setSelectedJobId(null);
+    setStatus(`Marking applied: ${job.company} — ${job.title}`);
+    try {
+      const res = await sendMessage<{ ok?: boolean; error?: string }>({
+        type: MSG.MARK_JOB_APPLIED,
+        jobId: job.id,
+      });
+      if (!res?.ok) {
+        throw new Error(res?.error || 'Failed to mark as applied');
+      }
+      setStatus(`Marked applied: ${job.company} — ${job.title}`);
+    } catch (err) {
+      setWorkerJobs((prev) => {
+        if (prev.some((row) => row.id === job.id)) return prev;
+        return [job, ...prev];
+      });
+      if (wasSelected) setSelectedJobId(job.id);
+      setStatus(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMarkingJobId(null);
+    }
+  }, [selectedJobId]);
+
   const fetchDom = useCallback(async () => {
     setFetching(true);
     setStatus('Fetching DOM…');
@@ -407,8 +435,10 @@ export default function SidebarApp() {
           error={workerJobsError}
           selectedJobId={selectedJobId}
           opening={openingJob}
+          markingJobId={markingJobId}
           onRefresh={() => void fetchWorkerJobs()}
           onOpen={(job) => void openWorkerJob(job)}
+          onMarkApplied={(job) => void markJobApplied(job)}
         />
       ) : null}
 

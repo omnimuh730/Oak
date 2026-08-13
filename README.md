@@ -94,6 +94,7 @@ npm run build -w extension
 | POST | `/api/oak/match-option` | Bearer |
 | GET | `/api/oak/runtime-file` | Bearer |
 | GET | `/api/oak/jobs` | Bearer — Worker Pool jobs |
+| POST | `/api/oak/jobs/:jobId/mark-applied` | Bearer — clear Worker pool, then mark applied |
 | GET | `/api/oak/jobs/:jobId/recommended-resume` | Bearer — Library resume assigned in Job Search |
 
 Socket.io: same host, path `/oak`, handshake `auth.token` = access token.

@@ -330,6 +330,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === MSG.MARK_JOB_APPLIED) {
+    void (async () => {
+      try {
+        const jobId = String(message.jobId || '').trim();
+        if (!jobId) {
+          sendResponse({ ok: false, error: 'Missing job id' });
+          return;
+        }
+        const token = await getAccessToken();
+        if (!token) {
+          sendResponse({ ok: false, error: 'Sign in required' });
+          return;
+        }
+        const base = await getAthensApiUrl();
+        const res = await fetch(
+          `${base}/api/oak/jobs/${encodeURIComponent(jobId)}/mark-applied`,
+          {
+            method: 'POST',
+            headers: await authHeaders(),
+          },
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          success?: boolean;
+          message?: string;
+          error?: string;
+        };
+        if (!res.ok || data.success === false) {
+          sendResponse({
+            ok: false,
+            error:
+              data.message ||
+              data.error ||
+              `Mark applied failed (${res.status})`,
+          });
+          return;
+        }
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        if (tab?.id) {
+          const bound = await getTabJob(tab.id);
+          if (bound?.jobId === jobId) await unbindTabJob(tab.id);
+        }
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === MSG.GET_TAB_JOB) {
     void (async () => {
       let tabId =
