@@ -35,7 +35,7 @@ export function isOakDomFrame(): boolean {
   return formControlScore() >= MIN_CHILD_FORM_CONTROLS;
 }
 
-/** FAB / overlay: top frame only (pipeline still selects the richest form frame). */
+/** Overlay sidebar: top frame only (pipeline still selects the richest form frame). */
 export function shouldMountOakUi(): boolean {
   return window === window.top;
 }

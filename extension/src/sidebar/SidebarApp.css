@@ -1,4 +1,5 @@
 .sidebar-app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -21,7 +22,8 @@
 
 .tools h3,
 .connection h3,
-.preview h3 {
+.preview h3,
+.plan-run h3 {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -70,6 +72,230 @@
 
 .tool-icon { font-size: 22px; }
 .tool-label { font-size: 12px; font-weight: 500; }
+.tool-hint { font-size: 11px; color: #8b92a5; }
+
+.fill-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 16px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2f6f4e, #1f4d36);
+  border: 1px solid rgba(120, 180, 140, 0.35);
+  color: #f3faf5;
+}
+
+.fill-card:not(:disabled):hover {
+  background: linear-gradient(135deg, #3d7a56, #245a3d);
+}
+
+.fill-card:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.fill-card.analyzing,
+.fill-card.fetching,
+.fill-card.running {
+  background: linear-gradient(135deg, #3d7a56, #285c40);
+}
+
+.fill-card.done {
+  background: linear-gradient(135deg, #2f6f4e, #245a3d);
+}
+
+.fill-card.error {
+  background: linear-gradient(135deg, #8b3a3a, #6b2a2a);
+}
+
+.tree-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tree-actions button {
+  background: #1a1d27;
+  border: 1px solid #2e3344;
+  color: #e8eaef;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.tree-actions button:not(:disabled):hover {
+  background: #2e3344;
+}
+
+.tree-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.plan-goal {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #8b92a5;
+  line-height: 1.4;
+}
+
+.plan-run-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: #8b92a5;
+  margin-bottom: 8px;
+}
+
+.plan-run-live {
+  color: #7c6cf0;
+  font-weight: 600;
+}
+
+.plan-run-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow: auto;
+  background: #14161e;
+  border: 1px solid #2e3344;
+  border-radius: 10px;
+}
+
+.plan-step {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2e3344;
+  font-size: 11px;
+}
+
+.plan-step:last-child {
+  border-bottom: none;
+}
+
+.plan-step-idx {
+  color: #8b92a5;
+}
+
+.plan-step-action {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #e8eaef;
+}
+
+.plan-step-status {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 10px;
+}
+
+.plan-step-target {
+  grid-column: 2 / -1;
+  color: #8b92a5;
+}
+
+.plan-step-msg {
+  grid-column: 2 / -1;
+  color: #8b92a5;
+  word-break: break-word;
+}
+
+.status-ok .plan-step-status { color: #4ade80; }
+.status-running .plan-step-status { color: #7c6cf0; }
+.status-paused .plan-step-status { color: #facc15; }
+.status-skipped .plan-step-status { color: #8b92a5; }
+.status-blocked .plan-step-status { color: #fb923c; }
+.status-failed .plan-step-status,
+.status-aborted .plan-step-status { color: #fca5a5; }
+
+.inspect-panel {
+  position: absolute;
+  inset: 12px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+  background: #14161e;
+  border: 1px solid #2e3344;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.inspect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2e3344;
+}
+
+.inspect-header h3 {
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #e8eaef;
+  margin: 0;
+}
+
+.inspect-close {
+  background: none;
+  color: #8b92a5;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.inspect-close:hover {
+  background: #2e3344;
+  color: #e8eaef;
+}
+
+.inspect-pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #e8eaef;
+}
+
+.inspect-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid #2e3344;
+}
+
+.inspect-footer button {
+  background: #242836;
+  color: #e8eaef;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.inspect-footer button.primary {
+  background: #2f6f4e;
+}
+
+.status-bar.phase-error {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.status-bar.phase-done {
+  color: #4ade80;
+}
 
 .field {
   display: flex;

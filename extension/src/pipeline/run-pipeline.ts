@@ -1,6 +1,11 @@
 import { formatDuration, formatUsd } from '../../../shared/ai-usage';
 import { runActionPlan } from '../../../shared/plan-runner/orchestrator';
-import type { ActionPlan, PauseRequest, PlanStepPayload } from '../../../shared/plan-runner/types';
+import type {
+  ActionPlan,
+  PauseRequest,
+  PlanStepPayload,
+  RunStepRecord,
+} from '../../../shared/plan-runner/types';
 import type { PipelineProgress } from '../../../shared/pipeline-types';
 import {
   formatMetaTreePreview,
@@ -24,7 +29,7 @@ export interface RunPipelineArgs {
   aiServerUrl?: string;
   /** Emit DOM tree to backend for UI board (optional socket emit callback). */
   emitDomTree?: (payload: DomTreePayload) => void;
-  /** Broadcast progress to page FAB + backend. */
+  /** Broadcast progress to the sidebar overlay + backend. */
   onProgress: PipelineEmit;
 }
 
@@ -128,6 +133,17 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
   const startedAt = Date.now();
   beginPipelineUsageTracking(tabId);
 
+  let treeSnapshot: PipelineProgress['tree'];
+  let planSnapshot: ActionPlan | undefined;
+  let stepsSnapshot: RunStepRecord[] | undefined;
+
+  const emit: PipelineEmit = (progress) => {
+    if (progress.tree) treeSnapshot = progress.tree;
+    if (progress.plan) planSnapshot = progress.plan;
+    if (progress.steps) stepsSnapshot = progress.steps;
+    onProgress(progress);
+  };
+
   const finishMeta = () => {
     const durationMs = Date.now() - startedAt;
     const usage = endPipelineUsageTracking(tabId);
@@ -135,15 +151,22 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
   };
 
   try {
-    onProgress({ phase: 'fetching', message: 'Fetching DOM…' });
+    emit({ phase: 'fetching', message: 'Fetching DOM…' });
 
     const treePayload = await fetchDomFromTab(tabId, preferredFrameId);
     emitDomTree?.(treePayload);
+    treeSnapshot = {
+      url: treePayload.url,
+      title: treePayload.title,
+      tree: treePayload.tree,
+      fetchedAt: treePayload.fetchedAt,
+    };
 
     const nodeCount = countDomNodes(treePayload.tree);
-    onProgress({
+    emit({
       phase: 'analyzing',
       message: `Analyzing ${nodeCount} nodes…`,
+      tree: treeSnapshot,
     });
 
     const split = splitDomTree(treePayload.tree);
@@ -165,13 +188,15 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     addPipelineUsage(tabId, analyze.usage);
 
     const plan = analyze.plan as ActionPlan;
+    planSnapshot = plan;
     const stepTotal = plan.actions?.length ?? 0;
 
-    onProgress({
+    emit({
       phase: 'running',
       message: stepTotal ? `Running 0/${stepTotal}…` : 'Running…',
       stepIndex: 0,
       stepTotal,
+      plan,
     });
 
     const runtimeFile = await fetchRuntimeFile(aiServerUrl);
@@ -207,7 +232,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
           ).length;
           const current = running ?? steps[Math.min(doneCount, steps.length - 1)];
           const idx = current ? current.index + 1 : doneCount;
-          onProgress({
+          emit({
             phase: 'running',
             message: `Running ${Math.min(idx, stepTotal)}/${stepTotal}…`,
             stepIndex: current?.index,
@@ -215,10 +240,11 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
             stepLabel: current
               ? shortLabel(current.expected_label, current.action)
               : undefined,
+            steps,
           });
         },
         onPause: async (request) => {
-          onProgress({
+          emit({
             phase: 'running',
             message:
               request.kind === 'error'
@@ -238,13 +264,16 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     const costLabel = formatUsd(usage?.costUsd);
 
     if (report.aborted) {
-      onProgress({
+      emit({
         phase: 'error',
         message: `Aborted · ${timeLabel} · ${costLabel}`,
         error: 'Plan run aborted',
         stepTotal,
         durationMs,
         usage,
+        tree: treeSnapshot,
+        plan: planSnapshot,
+        steps: report.steps,
       });
       return;
     }
@@ -254,22 +283,28 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
       ? `${summary.ok} ok`
       : `${summary.ok} ok, ${summary.skipped} skipped`;
 
-    onProgress({
+    emit({
       phase: 'done',
       message: `Done · ${resultLabel} · ${timeLabel} · ${costLabel}`,
       stepTotal,
       durationMs,
       usage,
+      tree: treeSnapshot,
+      plan: planSnapshot,
+      steps: report.steps,
     });
   } catch (err) {
     const { durationMs, usage } = finishMeta();
     const error = err instanceof Error ? err.message : String(err);
-    onProgress({
+    emit({
       phase: 'error',
       message: `Failed · ${formatDuration(durationMs)} · ${formatUsd(usage?.costUsd)}`,
       error,
       durationMs,
       usage,
+      tree: treeSnapshot,
+      plan: planSnapshot,
+      steps: stepsSnapshot,
     });
   }
 }

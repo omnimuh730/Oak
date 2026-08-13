@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Oak",
-  "version": "1.0.0",
-  "description": "Fetch and visualize DOM trees via Oak UI Board",
+  "version": "1.1.0",
+  "description": "Fill forms from the Oak sidebar and inspect DOM trees",
   "permissions": ["activeTab", "storage", "scripting", "alarms", "webNavigation"],
   "host_permissions": [
     "<all_urls>",
@@ -37,7 +37,7 @@
     }
   ],
   "action": {
-    "default_title": "Toggle Oak settings sidebar"
+    "default_title": "Toggle Oak sidebar"
   },
   "icons": {
     "16": "public/icon-16.png",

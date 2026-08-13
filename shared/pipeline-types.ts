@@ -1,6 +1,8 @@
-/** FAB one-click pipeline progress contract (extension ↔ page overlay). */
+/** One-click fill pipeline progress contract (extension ↔ sidebar overlay). */
 
 import type { AiUsageSummary } from './ai-usage';
+import type { ActionPlan, RunStepRecord } from './plan-runner/types';
+import type { DomTreeNode } from './tree-export';
 
 export type PipelinePhase =
   | 'idle'
@@ -9,6 +11,13 @@ export type PipelinePhase =
   | 'running'
   | 'done'
   | 'error';
+
+export interface PipelineTreeSnapshot {
+  url: string;
+  title: string;
+  tree: DomTreeNode;
+  fetchedAt: string;
+}
 
 export interface PipelineProgress {
   phase: PipelinePhase;
@@ -21,4 +30,10 @@ export interface PipelineProgress {
   durationMs?: number;
   /** Aggregated AI token usage / estimated USD (analyze + match-option). */
   usage?: AiUsageSummary | null;
+  /** UI-only snapshot of the tree sent to AI Analyze. */
+  tree?: PipelineTreeSnapshot;
+  /** UI-only AI Analyze plan JSON. */
+  plan?: ActionPlan;
+  /** UI-only live plan-run records (ok / skipped / blocked / failed). */
+  steps?: RunStepRecord[];
 }

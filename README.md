@@ -9,7 +9,7 @@ Chrome extension + React UI board for capturing page DOM trees, generating struc
 ```
 ┌─────────────────────┐   socket.io /oak    ┌──────────────────────┐
 │  Chrome Extension   │ ◄─────────────────► │  athens-backend      │
-│  (FAB + sidebar)    │                     │  :8980               │
+│  (sidebar overlay)  │                     │  :8980               │
 └──────────┬──────────┘   HTTP /api/oak/*   └──────────┬───────────┘
            │ fetch DOM                                 │ broadcast
            ▼                                           ▼
@@ -26,7 +26,7 @@ Auth: Athens account username + password (`POST /api/oak/auth/signin`). AI Analy
 | Project | Path | Description |
 |---------|------|-------------|
 | UI Board | `ui-board/` | React app with DOM tree visualization + AI Analyze / Run |
-| Extension | `extension/` | Chrome MV3 extension with FAB + sidebar |
+| Extension | `extension/` | Chrome MV3 extension with fill sidebar |
 | Shared | `shared/` | Client-side plan/DOM types (not a Nest package) |
 
 ## Quick Start
@@ -75,9 +75,10 @@ npm run build -w extension
 ### 5. Use it
 
 1. Visit any website
-2. Click the floating Oak logo (bottom-left) to run Fetch → Analyze → Fill (requires sign-in)
-3. Or **Fetch DOM** in the sidebar — the tree appears on the UI board
-4. On the UI board: **AI Analyze** then **Run**
+2. Click the Oak toolbar icon to open the sidebar
+3. Sign in, then **Fill page** — Fetch → Analyze → Fill (same pipeline as the old FAB)
+4. In the sidebar: **Pure Tree**, **Meta Tree**, **AI Analyze**, and the plan-run step list (verified / skipped)
+5. **Fetch DOM** still sends a snapshot to the UI board if you want the desktop board
 
 ## API (athens-backend)
 

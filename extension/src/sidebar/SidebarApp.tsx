@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatDuration, formatUsd } from '../../../shared/ai-usage';
+import type { ActionPlan, RunStepRecord } from '../../../shared/plan-runner/types';
+import type { PipelineProgress } from '../../../shared/pipeline-types';
+import {
+  formatMetaTreePreview,
+  formatPureTreePreview,
+  splitDomTree,
+  type DomTreeNode,
+} from '../../../shared/tree-export';
 import {
   DEFAULT_ATHENS_API_URL,
   getAthensApiUrl,
@@ -7,6 +16,7 @@ import {
   type OakStoredSession,
 } from '../auth/oak-auth';
 import { MSG, type DomNode, type DomTreePayload } from '../types';
+import { InspectPanel } from './InspectPanel';
 import './SidebarApp.css';
 
 function sendMessage<T>(message: unknown): Promise<T> {
@@ -25,6 +35,10 @@ function sendMessage<T>(message: unknown): Promise<T> {
   });
 }
 
+function requestStartPipeline() {
+  window.parent.postMessage({ type: MSG.START_PIPELINE }, '*');
+}
+
 export default function SidebarApp() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_ATHENS_API_URL);
   const [session, setSession] = useState<OakStoredSession | null>(null);
@@ -35,6 +49,16 @@ export default function SidebarApp() {
   const [fetching, setFetching] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [lastFetch, setLastFetch] = useState<DomTreePayload | null>(null);
+  const [progress, setProgress] = useState<PipelineProgress>({
+    phase: 'idle',
+    message: 'Idle',
+  });
+  const [inspect, setInspect] = useState<{ title: string; content: string } | null>(null);
+
+  const pipelineBusy =
+    progress.phase === 'fetching' ||
+    progress.phase === 'analyzing' ||
+    progress.phase === 'running';
 
   useEffect(() => {
     void (async () => {
@@ -66,6 +90,45 @@ export default function SidebarApp() {
       clearInterval(id);
     };
   }, [session, apiUrl]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== MSG.PIPELINE_PROGRESS || !event.data.progress) return;
+      const next = event.data.progress as PipelineProgress;
+      const starting = next.phase === 'fetching';
+      setProgress((prev) => ({
+        ...prev,
+        ...next,
+        tree: starting ? next.tree : next.tree ?? prev.tree,
+        plan: starting ? next.plan : next.plan ?? prev.plan,
+        steps: starting ? next.steps ?? [] : next.steps ?? prev.steps,
+      }));
+      if (next.tree) {
+        setLastFetch({
+          url: next.tree.url,
+          title: next.tree.title,
+          tree: next.tree.tree as unknown as DomNode,
+          fetchedAt: next.tree.fetchedAt,
+        });
+      }
+      if (next.phase === 'idle') {
+        setStatus(next.message || 'Ready');
+        return;
+      }
+      const parts = [
+        next.message,
+        next.stepLabel ? `Step: ${next.stepLabel}` : null,
+        next.durationMs != null ? `Time: ${formatDuration(next.durationMs)}` : null,
+        next.usage
+          ? `AI: ${formatUsd(next.usage.costUsd)} · ${next.usage.totalTokens || 0} tok`
+          : null,
+        next.error ? `Error: ${next.error}` : null,
+      ].filter(Boolean);
+      setStatus(parts.join(' · '));
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
 
   const handleSignIn = async () => {
     setAuthBusy(true);
@@ -141,14 +204,54 @@ export default function SidebarApp() {
     }
   }, []);
 
+  const treeNode = lastFetch?.tree as unknown as DomTreeNode | undefined;
+  const splitTrees = useMemo(() => {
+    if (!treeNode) return null;
+    return splitDomTree(treeNode);
+  }, [treeNode]);
+
+  const plan: ActionPlan | undefined = progress.plan;
+  const steps: RunStepRecord[] = progress.steps ?? [];
   const nodeCount = lastFetch ? countNodes(lastFetch.tree) : 0;
+
+  const stepSummary = {
+    ok: steps.filter((s) => s.status === 'ok').length,
+    skipped: steps.filter((s) => s.status === 'skipped').length,
+    blocked: steps.filter((s) => s.status === 'blocked').length,
+    failed: steps.filter((s) => s.status === 'failed' || s.status === 'aborted').length,
+  };
+
+  const openPureTree = () => {
+    if (!splitTrees) return;
+    setInspect({
+      title: 'Pure Tree',
+      content: formatPureTreePreview(splitTrees.pure),
+    });
+  };
+
+  const openMetaTree = () => {
+    if (!splitTrees) return;
+    setInspect({
+      title: 'Meta Tree',
+      content: formatMetaTreePreview(splitTrees.meta, splitTrees.pure),
+    });
+  };
+
+  const openAiAnalyze = () => {
+    if (!plan) return;
+    setInspect({
+      title: 'AI Analyze',
+      content: JSON.stringify(plan, null, 2),
+    });
+  };
 
   return (
     <div className="sidebar-app">
       <section className="welcome">
-        <h2>Welcome</h2>
+        <h2>Oak</h2>
         <p className="hint">
-          Sign in with your Athens account, then capture the page DOM for the Oak UI Board.
+          Sign in, then Fill the current page (Fetch → Analyze → Fill). Inspect the captured
+          trees, AI plan, and step results here.
         </p>
       </section>
 
@@ -163,7 +266,7 @@ export default function SidebarApp() {
               type="button"
               className="tool-card"
               onClick={() => void handleSignOut()}
-              disabled={authBusy}
+              disabled={authBusy || pipelineBusy}
             >
               Sign out
             </button>
@@ -222,13 +325,29 @@ export default function SidebarApp() {
       </section>
 
       <section className="tools">
-        <h3>Tools</h3>
-        <div className="tool-grid">
+        <h3>Fill</h3>
+        <button
+          type="button"
+          className={`fill-card ${progress.phase}`}
+          onClick={() => requestStartPipeline()}
+          disabled={pipelineBusy || !session}
+        >
+          <span className="tool-icon">▶</span>
+          <span className="tool-label">
+            {pipelineBusy
+              ? progress.message
+              : progress.phase === 'done'
+                ? 'Fill again'
+                : 'Fill page'}
+          </span>
+          <span className="tool-hint">Fetch → Analyze → Fill</span>
+        </button>
+        <div className="tool-grid" style={{ marginTop: 8 }}>
           <button
             type="button"
-            className="tool-card primary"
-            onClick={fetchDom}
-            disabled={fetching || !connected || !session}
+            className="tool-card"
+            onClick={() => void fetchDom()}
+            disabled={fetching || pipelineBusy || !connected || !session}
           >
             <span className="tool-icon">⬡</span>
             <span className="tool-label">{fetching ? 'Fetching…' : 'Fetch DOM'}</span>
@@ -238,7 +357,7 @@ export default function SidebarApp() {
 
       {lastFetch && isValidTree(lastFetch.tree) && (
         <section className="preview">
-          <h3>Last Snapshot</h3>
+          <h3>Analyzed tree</h3>
           <div className="preview-card">
             <div className="preview-title">{String(lastFetch.title ?? 'Untitled')}</div>
             <div className="preview-url">{String(lastFetch.url ?? '')}</div>
@@ -246,41 +365,67 @@ export default function SidebarApp() {
               <span>{nodeCount} nodes</span>
               <span>{new Date(lastFetch.fetchedAt).toLocaleTimeString()}</span>
             </div>
-            <div className="mini-tree">
-              <MiniNode node={lastFetch.tree} depth={0} />
+            <div className="tree-actions">
+              <button type="button" disabled={!splitTrees} onClick={openPureTree}>
+                Pure Tree
+              </button>
+              <button type="button" disabled={!splitTrees} onClick={openMetaTree}>
+                Meta Tree
+              </button>
+              <button type="button" disabled={!plan} onClick={openAiAnalyze}>
+                {plan ? 'AI Analyze' : 'AI Analyze (pending)'}
+              </button>
             </div>
           </div>
         </section>
       )}
 
-      <footer className="status-bar">
+      {steps.length > 0 && (
+        <section className="plan-run">
+          <h3>Plan run</h3>
+          {plan?.goal && <p className="plan-goal">{plan.goal}</p>}
+          <div className="plan-run-summary">
+            <span>ok {stepSummary.ok}</span>
+            <span>skipped {stepSummary.skipped}</span>
+            <span>blocked {stepSummary.blocked}</span>
+            <span>failed {stepSummary.failed}</span>
+            {pipelineBusy && <span className="plan-run-live">running…</span>}
+          </div>
+          <ul className="plan-run-steps">
+            {steps.map((step) => (
+              <li key={step.index} className={`plan-step status-${step.status}`}>
+                <span className="plan-step-idx">{step.index + 1}</span>
+                <span className="plan-step-action">{step.action}</span>
+                <span className="plan-step-status">{stepStatusLabel(step)}</span>
+                <span className="plan-step-target">
+                  {step.element_index != null ? `[${step.element_index}]` : '—'}
+                  {step.expected_label ? ` ${step.expected_label}` : ''}
+                </span>
+                {step.message && <span className="plan-step-msg">{step.message}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {inspect && (
+        <InspectPanel
+          title={inspect.title}
+          content={inspect.content}
+          onClose={() => setInspect(null)}
+        />
+      )}
+
+      <footer className={`status-bar phase-${progress.phase}`}>
         <span>{status}</span>
       </footer>
     </div>
   );
 }
 
-function MiniNode({ node, depth }: { node: DomNode; depth: number }) {
-  if (depth > 2 || !node) return null;
-
-  const children = Array.isArray(node.children) ? node.children : [];
-
-  return (
-    <div className="mini-node" style={{ paddingLeft: depth * 12 }}>
-      <span className="mini-tag">&lt;{String(node.tag ?? 'unknown')}&gt;</span>
-      {typeof node.text === 'string' && node.text.length > 0 && (
-        <span className="mini-text"> &quot;{node.text}&quot;</span>
-      )}
-      {children.slice(0, 3).map((c) => (
-        <MiniNode key={`oak-node-${c.nodeId}`} node={c} depth={depth + 1} />
-      ))}
-      {children.length > 3 && (
-        <div className="mini-node" style={{ paddingLeft: (depth + 1) * 12 }}>
-          …
-        </div>
-      )}
-    </div>
-  );
+function stepStatusLabel(step: RunStepRecord): string {
+  if (step.status === 'ok') return 'verified';
+  return step.status;
 }
 
 function isValidTree(tree: unknown): tree is DomNode {
