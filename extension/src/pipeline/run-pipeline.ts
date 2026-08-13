@@ -15,7 +15,8 @@ import {
 import { sendPlanStepToTab, sendTabMessage } from '../tab-messaging';
 import { getTabJob } from '../tab-job-session';
 import { DEFAULT_AI_SERVER, MSG, type DomNode, type DomTreePayload } from '../types';
-import { fetchRecommendedResume, fetchRuntimeFile, requestAiAnalyze } from './ai-client';
+import { fetchRuntimeFile, requestAiAnalyze } from './ai-client';
+import { keepResumeIfSameSite, loadFillResume } from './fill-resume';
 import { buildResumeUploadProgress } from './resume-upload-status';
 import {
   addPipelineUsage,
@@ -156,13 +157,19 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     emit({ phase: 'fetching', message: 'Fetching DOM…' });
 
     const tabJob = await getTabJob(tabId);
-    const [treePayload, recommendedResume, runtimeFile] = await Promise.all([
+    const [treePayload, resumeLoad, runtimeFile] = await Promise.all([
       fetchDomFromTab(tabId, preferredFrameId),
-      tabJob?.jobId
-        ? fetchRecommendedResume(tabJob.jobId, aiServerUrl).catch(() => null)
-        : Promise.resolve(null),
+      loadFillResume({ tabJob, apiUrl: aiServerUrl }),
       fetchRuntimeFile(aiServerUrl).catch(() => null),
     ]);
+    const boundResume = keepResumeIfSameSite(
+      resumeLoad.file,
+      tabJob,
+      treePayload.url,
+      resumeLoad.skipReason,
+    );
+    const recommendedResume = boundResume.file;
+    const resumeSkipReason = boundResume.skipReason;
     emitDomTree?.(treePayload);
     treeSnapshot = {
       url: treePayload.url,
@@ -175,6 +182,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
       buildResumeUploadProgress({
         recommendedResume,
         resumeStack: tabJob?.resumeStack ?? null,
+        skipReason: resumeSkipReason,
         steps: stepsSnapshot,
       });
 
@@ -276,6 +284,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
             resumeUpload: buildResumeUploadProgress({
               recommendedResume,
               resumeStack: tabJob?.resumeStack ?? null,
+              skipReason: resumeSkipReason,
               steps,
             }),
           });
@@ -304,6 +313,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     const doneResume = buildResumeUploadProgress({
       recommendedResume,
       resumeStack: tabJob?.resumeStack ?? null,
+      skipReason: resumeSkipReason,
       steps: report.steps,
     });
 

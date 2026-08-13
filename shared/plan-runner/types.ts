@@ -47,8 +47,12 @@ export interface RuntimeAttachedFile {
   name: string;
   mimeType: string;
   base64: string;
-  /** Library stack label for UI (e.g. "Go + Python"). */
+  /** Library stack label for UI (e.g. folder title). */
   label?: string | null;
+  /** Library row id assigned to this job. */
+  resumeId?: string | null;
+  /** Worker pool job this file was fetched for. */
+  jobId?: string | null;
 }
 
 export interface PlanStepPayload {

@@ -81,6 +81,8 @@ export interface RuntimeAttachedFile {
   mimeType: string;
   base64: string;
   label?: string | null;
+  resumeId?: string | null;
+  jobId?: string | null;
 }
 
 export interface PlanStepPayload {

@@ -199,7 +199,11 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
         if (!step.file?.base64) {
           throw new Error('resume_upload requires the recommended Library resume');
         }
-        valueAfter = await resumeUpload(verified.element, step.file);
+        valueAfter = await resumeUpload(
+          verified.element,
+          step.file,
+          step.expected_label,
+        );
         break;
       }
       case 'select_radio': {

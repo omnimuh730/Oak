@@ -1,4 +1,5 @@
 import { collectForbiddenIndexes, targetsForbiddenIndex } from './forbidden';
+import { labelLooksLikeOtherDocument } from './resume-field';
 import {
   isExecutableStep,
   missingUploadReason,
@@ -184,6 +185,16 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
     if (!isExecutableStep(action.action)) {
       steps[i].status = 'failed';
       steps[i].message = `Unsupported action: ${action.action}`;
+      publish();
+      continue;
+    }
+
+    if (
+      action.action === 'resume_upload' &&
+      labelLooksLikeOtherDocument(action.expected_label)
+    ) {
+      steps[i].status = 'skipped';
+      steps[i].message = 'Recommended resume is only for Resume/CV controls';
       publish();
       continue;
     }

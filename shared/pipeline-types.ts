@@ -41,5 +41,7 @@ export interface PipelineProgress {
     status: 'ready' | 'uploaded' | 'skipped';
     stack: string | null;
     fileName: string | null;
+    resumeId?: string | null;
+    reason?: string | null;
   };
 }

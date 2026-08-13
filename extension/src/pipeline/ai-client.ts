@@ -112,6 +112,8 @@ export async function fetchRecommendedResume(
   );
   const data = (await res.json().catch(() => ({}))) as {
     file?: RuntimeAttachedFile;
+    jobId?: string | null;
+    resumeId?: string | null;
     stack?: string | null;
     error?: string;
     message?: string;
@@ -126,10 +128,22 @@ export async function fetchRecommendedResume(
           : `Recommended resume failed: ${res.status}`,
     );
   }
-  if (!data.file) return null;
-  const stack = String(data.stack || data.file.label || '').trim();
+  const responseJobId = String(data.jobId || '').trim();
+  if (responseJobId && responseJobId !== id) {
+    throw new Error('Recommended resume belongs to a different job');
+  }
+  const file = data.file;
+  if (!file?.base64 || !String(file.name || '').trim()) return null;
+  const resumeId = String(data.resumeId || file.resumeId || '').trim();
+  if (!resumeId) {
+    throw new Error('Recommended resume response was missing the Library id');
+  }
+  const stack = String(data.stack || file.label || '').trim();
   return {
-    ...data.file,
-    label: stack || data.file.name,
+    ...file,
+    key: file.key || 'recommended_resume',
+    resumeId,
+    jobId: responseJobId || id,
+    label: stack || file.name,
   };
 }

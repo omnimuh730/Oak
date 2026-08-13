@@ -1,3 +1,6 @@
+import {
+  labelLooksLikeResume,
+} from './resume-field';
 import type { PlanAction, RuntimeAttachedFile } from './types';
 
 export type PlanStepFiles = {
@@ -21,7 +24,10 @@ export function isExecutableStep(action: PlanAction['action']): boolean {
 export function wantsRecommendedResume(action: PlanAction): boolean {
   if (action.action === 'resume_upload') return true;
   if (action.action !== 'upload') return false;
-  return RECOMMENDED_FILE_KEYS.has(String(action.file || '').trim().toLowerCase());
+  if (RECOMMENDED_FILE_KEYS.has(String(action.file || '').trim().toLowerCase())) {
+    return true;
+  }
+  return labelLooksLikeResume(action.expected_label);
 }
 
 export function resolveStepFile(
