@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   IDLE_PIPELINE_PROGRESS,
   mergePipelineProgress,
@@ -6,8 +6,11 @@ import {
 } from '../../../shared/pipeline-types';
 import type { ActionPlan, RunStepRecord } from '../../../shared/plan-runner/types';
 import {
+  collectLines,
   formatMetaTreePreview,
   formatPureTreePreview,
+  iterateMetaTreeLines,
+  iteratePureTreeLines,
   splitDomTree,
   type DomTreeNode,
 } from '../../../shared/tree-export';
@@ -19,18 +22,23 @@ import {
   type OakStoredSession,
 } from '../auth/oak-auth';
 import { MSG, type DomNode, type DomTreePayload } from '../types';
-import { InspectPanel } from './InspectPanel';
+import { InspectPanel, useInspectWindow } from './InspectPanel';
+import { LoadMoreFooter } from './LoadMoreFooter';
 import { formatProgressStatus } from './progress-status';
 import { ResumeUploadNote } from './ResumeUploadNote';
 import { sendMessage } from './runtime';
+import { clearTabTree, getTabTree, setTabTree, type TabTreeSummary } from './tab-tree-cache';
 import { useActiveTabId } from './use-active-tab';
+import { useShownCount } from './use-shown-count';
 import { useTabSession } from './use-tab-session';
 import { WorkerPoolList, type OakWorkerJob } from './WorkerPoolList';
 import './SidebarApp.css';
 
+type InspectKind = 'pure' | 'meta' | 'plan';
+
 type TabUi = {
-  lastFetch: DomTreePayload | null;
-  inspect: { title: string; content: string } | null;
+  lastFetch: TabTreeSummary | null;
+  inspect: { title: string; kind: InspectKind } | null;
   fetching: boolean;
 };
 
@@ -39,6 +47,8 @@ const EMPTY_TAB_UI: TabUi = {
   inspect: null,
   fetching: false,
 };
+
+const STEP_PAGE = 30;
 
 export default function SidebarApp() {
   const activeTabId = useActiveTabId();
@@ -57,6 +67,7 @@ export default function SidebarApp() {
   const [workerJobsError, setWorkerJobsError] = useState<string | null>(null);
   const [openingJob, setOpeningJob] = useState(false);
   const [markingJobId, setMarkingJobId] = useState<string | null>(null);
+  const [jobsListKey, setJobsListKey] = useState(0);
 
   const tabKey = activeTabId != null ? String(activeTabId) : null;
   const ui = (tabKey && tabUi[tabKey]) || EMPTY_TAB_UI;
@@ -101,6 +112,21 @@ export default function SidebarApp() {
   }, [activeTabId]);
 
   useEffect(() => {
+    const onRemoved = (tabId: number) => {
+      clearTabTree(tabId);
+      setTabUi((prev) => {
+        const key = String(tabId);
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    };
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    return () => chrome.tabs.onRemoved.removeListener(onRemoved);
+  }, []);
+
+  useEffect(() => {
     let alive = true;
 
     const check = async () => {
@@ -119,6 +145,44 @@ export default function SidebarApp() {
       clearInterval(id);
     };
   }, [session, apiUrl]);
+
+  const cacheTree = useCallback(
+    (tabId: number, payload: { url: string; title: string; fetchedAt: string; tree: DomTreeNode }) => {
+      const existing = getTabTree(tabId);
+      if (existing?.fetchedAt === payload.fetchedAt) {
+        patchTabUi(tabId, {
+          lastFetch: {
+            url: existing.url,
+            title: existing.title,
+            fetchedAt: existing.fetchedAt,
+            nodeCount: existing.nodeCount,
+          },
+        });
+        return;
+      }
+      const nodeCount = countNodes(payload.tree as unknown as DomNode);
+      const summary: TabTreeSummary = {
+        url: payload.url,
+        title: payload.title,
+        fetchedAt: payload.fetchedAt,
+        nodeCount,
+      };
+      setTabTree(tabId, { ...summary, tree: payload.tree });
+      patchTabUi(tabId, { lastFetch: summary });
+    },
+    [patchTabUi],
+  );
+
+  useEffect(() => {
+    if (activeTabId == null || !progress.tree) return;
+    if (!isValidTree(progress.tree.tree)) return;
+    cacheTree(activeTabId, {
+      url: progress.tree.url,
+      title: progress.tree.title,
+      fetchedAt: progress.tree.fetchedAt,
+      tree: progress.tree.tree,
+    });
+  }, [activeTabId, progress.tree, cacheTree]);
 
   const handleSignIn = async () => {
     setAuthBusy(true);
@@ -183,6 +247,7 @@ export default function SidebarApp() {
       setWorkerJobsError(err instanceof Error ? err.message : String(err));
     } finally {
       setWorkerJobsLoading(false);
+      setJobsListKey((key) => key + 1);
     }
   }, []);
 
@@ -190,6 +255,7 @@ export default function SidebarApp() {
     if (!session) {
       setWorkerJobs([]);
       setWorkerJobsError(null);
+      setJobsListKey((key) => key + 1);
       return;
     }
     void fetchWorkerJobs();
@@ -304,36 +370,87 @@ export default function SidebarApp() {
         return;
       }
 
-      patchTabUi(tabId, { lastFetch: response });
-      setNotice(`Sent ${countNodes(response.tree)} nodes to UI board`);
+      cacheTree(tabId, {
+        url: response.url,
+        title: response.title,
+        fetchedAt: response.fetchedAt,
+        tree: response.tree as unknown as DomTreeNode,
+      });
+      setNotice(`Sent ${getTabTree(tabId)?.nodeCount ?? 0} nodes to UI board`);
     } catch (err) {
       setNotice(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       patchTabUi(tabId, { fetching: false });
     }
-  }, [activeTabId, patchTabUi]);
+  }, [activeTabId, patchTabUi, cacheTree]);
 
-  const lastFetch = useMemo(() => {
-    if (ui.lastFetch && isValidTree(ui.lastFetch.tree)) return ui.lastFetch;
-    if (!progress.tree) return null;
-    return {
-      url: progress.tree.url,
-      title: progress.tree.title,
-      tree: progress.tree.tree as unknown as DomNode,
-      fetchedAt: progress.tree.fetchedAt,
-      tabId: activeTabId ?? undefined,
-    } satisfies DomTreePayload;
-  }, [ui.lastFetch, progress.tree, activeTabId]);
+  const lastFetch = ui.lastFetch;
+  const inspectKind = ui.inspect?.kind ?? null;
+  const treeStamp = lastFetch?.fetchedAt;
 
-  const treeNode = lastFetch?.tree as unknown as DomTreeNode | undefined;
   const splitTrees = useMemo(() => {
-    if (!treeNode) return null;
-    return splitDomTree(treeNode);
-  }, [treeNode]);
+    if (inspectKind !== 'pure' && inspectKind !== 'meta') return null;
+    if (activeTabId == null) return null;
+    const tree = getTabTree(activeTabId)?.tree;
+    if (!tree) return null;
+    return splitDomTree(tree);
+  }, [inspectKind, activeTabId, treeStamp]);
 
   const plan: ActionPlan | undefined = progress.plan;
   const steps: RunStepRecord[] = progress.steps ?? [];
-  const nodeCount = lastFetch ? countNodes(lastFetch.tree) : 0;
+  const nodeCount = lastFetch?.nodeCount ?? 0;
+
+  const {
+    shownCount: stepShown,
+    loadMore: loadMoreSteps,
+    ensureCount: ensureStepCount,
+  } = useShownCount(STEP_PAGE, plan);
+  const visibleSteps = steps.slice(0, stepShown);
+  const hasMoreSteps = stepShown < steps.length;
+  const stepsListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const runningIdx = steps.findIndex(
+      (step) => step.status === 'running' || step.status === 'paused',
+    );
+    if (runningIdx >= 0) ensureStepCount(runningIdx + 1);
+  }, [steps, ensureStepCount]);
+
+  const inspectWindow = useInspectWindow(inspectKind);
+
+  const inspectView = useMemo(() => {
+    if (!inspectKind) return null;
+    if (inspectKind === 'plan') {
+      const all = JSON.stringify(plan ?? {}, null, 2).split('\n');
+      return {
+        lines: all.slice(0, inspectWindow.shownCount),
+        hasMore: inspectWindow.shownCount < all.length,
+        copy: () => navigator.clipboard.writeText(all.join('\n')),
+      };
+    }
+    if (!splitTrees) return { lines: [] as string[], hasMore: false, copy: async () => undefined };
+    if (inspectKind === 'pure') {
+      const collected = collectLines(
+        iteratePureTreeLines(splitTrees.pure),
+        inspectWindow.shownCount,
+      );
+      return {
+        ...collected,
+        copy: () => navigator.clipboard.writeText(formatPureTreePreview(splitTrees.pure)),
+      };
+    }
+    const collected = collectLines(
+      iterateMetaTreeLines(splitTrees.meta, splitTrees.pure),
+      inspectWindow.shownCount,
+    );
+    return {
+      ...collected,
+      copy: () =>
+        navigator.clipboard.writeText(
+          formatMetaTreePreview(splitTrees.meta, splitTrees.pure),
+        ),
+    };
+  }, [inspectKind, inspectWindow.shownCount, plan, splitTrees]);
 
   const stepSummary = {
     ok: steps.filter((s) => s.status === 'ok').length,
@@ -342,34 +459,9 @@ export default function SidebarApp() {
     failed: steps.filter((s) => s.status === 'failed' || s.status === 'aborted').length,
   };
 
-  const openPureTree = () => {
-    if (!splitTrees || activeTabId == null) return;
-    patchTabUi(activeTabId, {
-      inspect: {
-        title: 'Pure Tree',
-        content: formatPureTreePreview(splitTrees.pure),
-      },
-    });
-  };
-
-  const openMetaTree = () => {
-    if (!splitTrees || activeTabId == null) return;
-    patchTabUi(activeTabId, {
-      inspect: {
-        title: 'Meta Tree',
-        content: formatMetaTreePreview(splitTrees.meta, splitTrees.pure),
-      },
-    });
-  };
-
-  const openAiAnalyze = () => {
-    if (!plan || activeTabId == null) return;
-    patchTabUi(activeTabId, {
-      inspect: {
-        title: 'AI Analyze',
-        content: JSON.stringify(plan, null, 2),
-      },
-    });
+  const openInspect = (kind: InspectKind, title: string) => {
+    if (activeTabId == null) return;
+    patchTabUi(activeTabId, { inspect: { title, kind } });
   };
 
   const status = notice ?? formatProgressStatus(progress);
@@ -377,101 +469,89 @@ export default function SidebarApp() {
     tabJob?.resumeStack ??
     workerJobs.find((job) => job.id === tabJob?.jobId)?.recommendedResumeStack ??
     null;
+  const hasTree = Boolean(lastFetch);
 
   return (
-    <div className="sidebar-app">
-      <section className="welcome">
-        <h2>Oak</h2>
-        <p className="hint">
-          Sign in, pick a Worker pool job like Athens Lens, then Fill the current page
-          (Fetch → Analyze → Fill). Resume file inputs use the Library resume recommended
-          in Job Search. Each tab keeps its own job, resume, and fill run.
-        </p>
-      </section>
+    <div className={`sidebar-app${session ? ' signed-in' : ''}`}>
+      <div className="sidebar-chrome">
+        <section className="welcome">
+          <h2>Oak</h2>
+          <p className="hint">
+            Sign in, pick a Worker pool job like Athens Lens, then Fill the current page
+            (Fetch → Analyze → Fill). Resume file inputs use the Library resume recommended
+            in Job Search. Each tab keeps its own job, resume, and fill run.
+          </p>
+        </section>
 
-      <section className="connection">
-        <h3>Athens account</h3>
-        {session ? (
-          <div className="auth-signed-in">
-            <p className="auth-user">
-              Signed in as <strong>{session.displayName}</strong>
-            </p>
-            <button
-              type="button"
-              className="tool-card"
-              onClick={() => void handleSignOut()}
-              disabled={authBusy || pipelineBusy}
-            >
-              Sign out
-            </button>
+        <section className="connection">
+          <h3>Athens account</h3>
+          {session ? (
+            <div className="auth-signed-in">
+              <p className="auth-user">
+                Signed in as <strong>{session.displayName}</strong>
+              </p>
+              <button
+                type="button"
+                className="tool-card"
+                onClick={() => void handleSignOut()}
+                disabled={authBusy || pipelineBusy}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : (
+            <div className="auth-form">
+              <label className="field">
+                <span>Username</span>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoComplete="username"
+                  placeholder="Athens username"
+                />
+              </label>
+              <label className="field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Athens password"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleSignIn();
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="tool-card primary"
+                onClick={() => void handleSignIn()}
+                disabled={authBusy || !name.trim() || !password}
+              >
+                {authBusy ? 'Signing in…' : 'Sign in'}
+              </button>
+            </div>
+          )}
+
+          <label className="field" style={{ marginTop: 12 }}>
+            <span>Athens API URL</span>
+            <input
+              value={apiUrl}
+              onChange={(e) => setApiUrl(e.target.value)}
+              placeholder="http://127.0.0.1:8980"
+            />
+          </label>
+          <div className={`conn-status ${connected ? 'on' : 'off'}`}>
+            <span className="dot" />
+            {connected
+              ? 'Socket connected'
+              : session
+                ? 'Socket offline'
+                : 'Sign in to connect'}
           </div>
-        ) : (
-          <div className="auth-form">
-            <label className="field">
-              <span>Username</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoComplete="username"
-                placeholder="Athens username"
-              />
-            </label>
-            <label className="field">
-              <span>Password</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                placeholder="Athens password"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleSignIn();
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              className="tool-card primary"
-              onClick={() => void handleSignIn()}
-              disabled={authBusy || !name.trim() || !password}
-            >
-              {authBusy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </div>
-        )}
-
-        <label className="field" style={{ marginTop: 12 }}>
-          <span>Athens API URL</span>
-          <input
-            value={apiUrl}
-            onChange={(e) => setApiUrl(e.target.value)}
-            placeholder="http://127.0.0.1:8980"
-          />
-        </label>
-        <div className={`conn-status ${connected ? 'on' : 'off'}`}>
-          <span className="dot" />
-          {connected
-            ? 'Socket connected'
-            : session
-              ? 'Socket offline'
-              : 'Sign in to connect'}
-        </div>
-      </section>
-
-      {session ? (
-        <WorkerPoolList
-          jobs={workerJobs}
-          loading={workerJobsLoading}
-          error={workerJobsError}
-          selectedJobId={tabJob?.jobId ?? null}
-          attachments={attachments}
-          opening={openingJob}
-          markingJobId={markingJobId}
-          onRefresh={() => void fetchWorkerJobs()}
-          onOpen={(job) => void openWorkerJob(job)}
-          onMarkApplied={(job) => void markJobApplied(job)}
-        />
-      ) : null}
+        </section>
+      </div>
 
       <section className="tools">
         <h3>Fill</h3>
@@ -516,68 +596,101 @@ export default function SidebarApp() {
         </div>
       </section>
 
-      {lastFetch && isValidTree(lastFetch.tree) && (
-        <section className="preview">
-          <h3>Analyzed tree</h3>
-          <div className="preview-card">
-            <div className="preview-title">{String(lastFetch.title ?? 'Untitled')}</div>
-            <div className="preview-url">{String(lastFetch.url ?? '')}</div>
-            <div className="preview-meta">
-              <span>{nodeCount} nodes</span>
-              <span>{new Date(lastFetch.fetchedAt).toLocaleTimeString()}</span>
-            </div>
-            <div className="tree-actions">
-              <button type="button" disabled={!splitTrees} onClick={openPureTree}>
-                Pure Tree
-              </button>
-              <button type="button" disabled={!splitTrees} onClick={openMetaTree}>
-                Meta Tree
-              </button>
-              <button type="button" disabled={!plan} onClick={openAiAnalyze}>
-                {plan ? 'AI Analyze' : 'AI Analyze (pending)'}
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
+      {session ? (
+        <WorkerPoolList
+          jobs={workerJobs}
+          loading={workerJobsLoading}
+          error={workerJobsError}
+          selectedJobId={tabJob?.jobId ?? null}
+          attachments={attachments}
+          opening={openingJob}
+          markingJobId={markingJobId}
+          listKey={jobsListKey}
+          onRefresh={() => void fetchWorkerJobs()}
+          onOpen={(job) => void openWorkerJob(job)}
+          onMarkApplied={(job) => void markJobApplied(job)}
+        />
+      ) : null}
 
-      {steps.length > 0 && (
-        <section className="plan-run">
-          <h3>Plan run</h3>
-          {plan?.goal && <p className="plan-goal">{plan.goal}</p>}
-          <div className="plan-run-summary">
-            <span>ok {stepSummary.ok}</span>
-            <span>skipped {stepSummary.skipped}</span>
-            <span>blocked {stepSummary.blocked}</span>
-            <span>failed {stepSummary.failed}</span>
-            {pipelineBusy && <span className="plan-run-live">running…</span>}
-          </div>
-          <ul className="plan-run-steps">
-            {steps.map((step) => (
-              <li key={step.index} className={`plan-step status-${step.status}`}>
-                <span className="plan-step-idx">{step.index + 1}</span>
-                <span className="plan-step-action">{step.action}</span>
-                <span className="plan-step-status">{stepStatusLabel(step)}</span>
-                <span className="plan-step-target">
-                  {step.element_index != null ? `[${step.element_index}]` : '—'}
-                  {step.expected_label ? ` ${step.expected_label}` : ''}
-                </span>
-                {step.message && <span className="plan-step-msg">{step.message}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <div className="sidebar-after">
+        {lastFetch ? (
+          <section className="preview">
+            <h3>Analyzed tree</h3>
+            <div className="preview-card">
+              <div className="preview-title">{String(lastFetch.title ?? 'Untitled')}</div>
+              <div className="preview-url">{String(lastFetch.url ?? '')}</div>
+              <div className="preview-meta">
+                <span>{nodeCount} nodes</span>
+                <span>{new Date(lastFetch.fetchedAt).toLocaleTimeString()}</span>
+              </div>
+              <div className="tree-actions">
+                <button type="button" disabled={!hasTree} onClick={() => openInspect('pure', 'Pure Tree')}>
+                  Pure Tree
+                </button>
+                <button type="button" disabled={!hasTree} onClick={() => openInspect('meta', 'Meta Tree')}>
+                  Meta Tree
+                </button>
+                <button
+                  type="button"
+                  disabled={!plan}
+                  onClick={() => openInspect('plan', 'AI Analyze')}
+                >
+                  {plan ? 'AI Analyze' : 'AI Analyze (pending)'}
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
-      {ui.inspect && (
+        {steps.length > 0 ? (
+          <section className="plan-run">
+            <h3>Plan run</h3>
+            {plan?.goal && <p className="plan-goal">{plan.goal}</p>}
+            <div className="plan-run-summary">
+              <span>ok {stepSummary.ok}</span>
+              <span>skipped {stepSummary.skipped}</span>
+              <span>blocked {stepSummary.blocked}</span>
+              <span>failed {stepSummary.failed}</span>
+              {pipelineBusy && <span className="plan-run-live">running…</span>}
+            </div>
+            <div ref={stepsListRef} className="plan-run-scroll">
+              <ul className="plan-run-steps">
+                {visibleSteps.map((step) => (
+                  <li key={step.index} className={`plan-step status-${step.status}`}>
+                    <span className="plan-step-idx">{step.index + 1}</span>
+                    <span className="plan-step-action">{step.action}</span>
+                    <span className="plan-step-status">{stepStatusLabel(step)}</span>
+                    <span className="plan-step-target">
+                      {step.element_index != null ? `[${step.element_index}]` : '—'}
+                      {step.expected_label ? ` ${step.expected_label}` : ''}
+                    </span>
+                    {step.message && <span className="plan-step-msg">{step.message}</span>}
+                  </li>
+                ))}
+              </ul>
+              <LoadMoreFooter
+                hasMore={hasMoreSteps}
+                onLoadMore={loadMoreSteps}
+                rootRef={stepsListRef}
+                label={`Load more (${visibleSteps.length} of ${steps.length})`}
+              />
+            </div>
+          </section>
+        ) : null}
+      </div>
+
+      {ui.inspect && inspectView ? (
         <InspectPanel
           title={ui.inspect.title}
-          content={ui.inspect.content}
+          lines={inspectView.lines}
+          hasMore={inspectView.hasMore}
+          onLoadMore={inspectWindow.loadMore}
+          onCopy={inspectView.copy}
           onClose={() => {
             if (activeTabId != null) patchTabUi(activeTabId, { inspect: null });
           }}
         />
-      )}
+      ) : null}
 
       <footer className={`status-bar phase-${progress.phase}`}>
         <span>{status}</span>

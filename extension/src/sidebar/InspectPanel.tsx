@@ -1,13 +1,27 @@
+import { useRef } from 'react';
+import { LoadMoreFooter } from './LoadMoreFooter';
+import { useShownCount } from './use-shown-count';
+
+const INSPECT_PAGE = 200;
+
 interface InspectPanelProps {
   title: string;
-  content: string;
+  lines: string[];
+  hasMore: boolean;
+  onLoadMore(): void;
+  onCopy(): Promise<void> | void;
   onClose(): void;
 }
 
-export function InspectPanel({ title, content, onClose }: InspectPanelProps) {
-  const copy = async () => {
-    await navigator.clipboard.writeText(content);
-  };
+export function InspectPanel({
+  title,
+  lines,
+  hasMore,
+  onLoadMore,
+  onCopy,
+  onClose,
+}: InspectPanelProps) {
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   return (
     <div className="inspect-panel">
@@ -17,9 +31,17 @@ export function InspectPanel({ title, content, onClose }: InspectPanelProps) {
           ✕
         </button>
       </header>
-      <pre className="inspect-pre">{content || '(empty)'}</pre>
+      <div ref={bodyRef} className="inspect-body">
+        <pre className="inspect-pre">{lines.length ? lines.join('\n') : '(empty)'}</pre>
+        <LoadMoreFooter
+          hasMore={hasMore}
+          onLoadMore={onLoadMore}
+          rootRef={bodyRef}
+          label={`Load more (${lines.length} lines)`}
+        />
+      </div>
       <footer className="inspect-footer">
-        <button type="button" onClick={() => void copy()}>
+        <button type="button" onClick={() => void onCopy()}>
           Copy
         </button>
         <button type="button" className="primary" onClick={onClose}>
@@ -28,4 +50,8 @@ export function InspectPanel({ title, content, onClose }: InspectPanelProps) {
       </footer>
     </div>
   );
+}
+
+export function useInspectWindow(resetKey: unknown) {
+  return useShownCount(INSPECT_PAGE, resetKey);
 }

@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { JobAttachment } from '../tab-job-session';
+import { LoadMoreFooter } from './LoadMoreFooter';
+import { useShownCount } from './use-shown-count';
 
 export type OakWorkerJob = {
   id: string;
@@ -17,6 +19,17 @@ export type OakWorkerJob = {
   recommendedAt: string | null;
 };
 
+const JOB_PAGE = 20;
+
+function hasAssignedResume(job: OakWorkerJob): boolean {
+  return Boolean(job.recommendedResumeStack || job.recommendedResumeId);
+}
+
+/** Assigned resumes first; original order preserved within each group. */
+function sortJobsAssignedFirst(jobs: OakWorkerJob[]): OakWorkerJob[] {
+  return [...jobs].sort((a, b) => Number(hasAssignedResume(b)) - Number(hasAssignedResume(a)));
+}
+
 type WorkerPoolListProps = {
   jobs: OakWorkerJob[];
   loading: boolean;
@@ -25,6 +38,7 @@ type WorkerPoolListProps = {
   attachments: Record<string, JobAttachment>;
   opening: boolean;
   markingJobId: string | null;
+  listKey: number;
   onRefresh: () => void;
   onOpen: (job: OakWorkerJob) => void;
   onMarkApplied: (job: OakWorkerJob) => void;
@@ -41,6 +55,8 @@ function CompanyMark({ company, logoUrl }: { company: string; logoUrl?: string }
         <img
           src={logoUrl}
           alt=""
+          loading="lazy"
+          decoding="async"
           referrerPolicy="no-referrer"
           onError={() => setFailedUrl(logoUrl || '')}
         />
@@ -62,7 +78,7 @@ function CheckIcon() {
   );
 }
 
-export function WorkerPoolList({
+function WorkerPoolListInner({
   jobs,
   loading,
   error,
@@ -70,17 +86,34 @@ export function WorkerPoolList({
   attachments,
   opening,
   markingJobId,
+  listKey,
   onRefresh,
   onOpen,
   onMarkApplied,
 }: WorkerPoolListProps) {
+  const listRef = useRef<HTMLElement>(null);
+  const { shownCount, loadMore, ensureCount } = useShownCount(JOB_PAGE, listKey);
+  const orderedJobs = useMemo(() => sortJobsAssignedFirst(jobs), [jobs]);
+  const visibleJobs = orderedJobs.slice(0, shownCount);
+  const hasMore = shownCount < orderedJobs.length;
+
+  useEffect(() => {
+    if (!selectedJobId) return;
+    const idx = orderedJobs.findIndex((job) => job.id === selectedJobId);
+    if (idx >= 0) ensureCount(idx + 1);
+  }, [selectedJobId, orderedJobs, ensureCount]);
+
   return (
     <section className="worker-pool">
       <div className="worker-pool-head">
         <div>
           <h3>Jobs</h3>
           <p className="worker-pool-count">
-            {loading ? 'Loading…' : `${jobs.length} jobs`}
+            {loading
+              ? 'Loading…'
+              : hasMore
+                ? `${visibleJobs.length} of ${orderedJobs.length} jobs`
+                : `${orderedJobs.length} jobs`}
           </p>
         </div>
         <button
@@ -98,8 +131,8 @@ export function WorkerPoolList({
           No jobs in Worker pool. In Job Search, move roles to Worker pool.
         </p>
       ) : null}
-      <nav className="worker-pool-list" aria-label="Worker pool jobs">
-        {jobs.map((job) => {
+      <nav ref={listRef} className="worker-pool-list" aria-label="Worker pool jobs">
+        {visibleJobs.map((job) => {
           const selected = selectedJobId === job.id;
           const marking = markingJobId === job.id;
           const attached = attachments[job.id];
@@ -154,7 +187,15 @@ export function WorkerPoolList({
             </div>
           );
         })}
+        <LoadMoreFooter
+          hasMore={hasMore}
+          onLoadMore={loadMore}
+          rootRef={listRef}
+          label={`Load more (${visibleJobs.length} of ${orderedJobs.length})`}
+        />
       </nav>
     </section>
   );
 }
+
+export const WorkerPoolList = memo(WorkerPoolListInner);

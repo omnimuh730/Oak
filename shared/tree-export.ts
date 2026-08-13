@@ -107,6 +107,13 @@ function formatPureNodeLine(pure: PureNode): string {
   return `${pure.tag}[${pure.id}]${detailPart}${textPart}`;
 }
 
+export function* iteratePureTreeLines(pure: PureNode, depth = 0): Generator<string> {
+  yield `${'  '.repeat(depth)}${formatPureNodeLine(pure)}`;
+  for (const child of pure.children) {
+    yield* iteratePureTreeLines(child, depth + 1);
+  }
+}
+
 export function formatPureTreePreview(pure: PureNode, depth = 0): string {
   const indent = '  '.repeat(depth);
   const lines = [`${indent}${formatPureNodeLine(pure)}`];
@@ -122,7 +129,7 @@ function buildPureIndex(pure: PureNode, map = new Map<number, PureNode>()): Map<
   return map;
 }
 
-function formatMetaLine(meta: MetaNode, pureById: Map<number, PureNode>, depth: number): string {
+function formatMetaNodeLine(meta: MetaNode, pureById: Map<number, PureNode>, depth: number): string {
   const indent = '  '.repeat(depth);
   const pure = pureById.get(meta.id);
   const tag = pure?.tag ?? '?';
@@ -137,7 +144,26 @@ function formatMetaLine(meta: MetaNode, pureById: Map<number, PureNode>, depth: 
     if (attrStr) parts.push(attrStr);
   }
 
-  const lines = [`${indent}${parts.join(' ')}`];
+  return `${indent}${parts.join(' ')}`;
+}
+
+function* iterateMetaLines(
+  meta: MetaNode,
+  pureById: Map<number, PureNode>,
+  depth: number,
+): Generator<string> {
+  yield formatMetaNodeLine(meta, pureById, depth);
+  for (const child of meta.children) {
+    yield* iterateMetaLines(child, pureById, depth + 1);
+  }
+}
+
+export function iterateMetaTreeLines(meta: MetaNode, pure: PureNode): Generator<string> {
+  return iterateMetaLines(meta, buildPureIndex(pure), 0);
+}
+
+function formatMetaLine(meta: MetaNode, pureById: Map<number, PureNode>, depth: number): string {
+  const lines = [formatMetaNodeLine(meta, pureById, depth)];
   for (const child of meta.children) {
     lines.push(formatMetaLine(child, pureById, depth + 1));
   }
@@ -147,4 +173,21 @@ function formatMetaLine(meta: MetaNode, pureById: Map<number, PureNode>, depth: 
 export function formatMetaTreePreview(meta: MetaNode, pure: PureNode): string {
   const pureById = buildPureIndex(pure);
   return formatMetaLine(meta, pureById, 0);
+}
+
+/** Collect up to `limit` lines without materializing the rest of the iterator. */
+export function collectLines(
+  iter: Iterable<string>,
+  limit: number,
+): { lines: string[]; hasMore: boolean } {
+  const lines: string[] = [];
+  let hasMore = false;
+  for (const line of iter) {
+    if (lines.length >= limit) {
+      hasMore = true;
+      break;
+    }
+    lines.push(line);
+  }
+  return { lines, hasMore };
 }
