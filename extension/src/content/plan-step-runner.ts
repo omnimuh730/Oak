@@ -200,6 +200,9 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
       expectedLabelLen: String(step.expected_label || '').length,
       password: /password/i.test(String(step.expected_label || '')),
       email: /e-?mail/i.test(String(step.expected_label || '')),
+      nameField: /\bname\b/i.test(String(step.expected_label || '')),
+      phoneField: /\b(phone|mobile|tel)\b/i.test(String(step.expected_label || '')),
+      urlField: /\b(linkedin|url|website|portfolio)\b/i.test(String(step.expected_label || '')),
       preferred: /preferred/i.test(String(step.expected_label || '')),
       sms: /text message|sms|consent to receive/i.test(String(step.expected_label || '')),
     });
@@ -235,6 +238,10 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
           valueAfterLen: String(valueAfter || '').length,
           liveLen: String(readControlValue(el) || '').length,
           expectedLabelLen: String(step.expected_label || '').length,
+          nameField: /\bname\b/i.test(String(step.expected_label || '')),
+          phoneField: /\b(phone|mobile|tel)\b/i.test(String(step.expected_label || '')),
+          urlField: /\b(linkedin|url|website|portfolio)\b/i.test(String(step.expected_label || '')),
+          ariaInvalid: (el as HTMLElement).getAttribute?.('aria-invalid'),
         });
         break;
       }

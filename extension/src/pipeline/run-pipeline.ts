@@ -532,6 +532,23 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
                 status: s.status,
                 kind: kind(s.message),
               })),
+            contactSteps: report.steps
+              .filter((s) =>
+                /\b(name|phone|mobile|tel|linkedin|url|website|portfolio)\b/i.test(
+                  String(s.expected_label || ''),
+                ),
+              )
+              .map((s) => ({
+                action: s.action,
+                status: s.status,
+                kind: kind(s.message),
+                alreadyFilled: /already/i.test(String(s.message || '')),
+                nameField: /\bname\b/i.test(String(s.expected_label || '')),
+                phoneField: /\b(phone|mobile|tel)\b/i.test(String(s.expected_label || '')),
+                urlField: /\b(linkedin|url|website|portfolio)\b/i.test(
+                  String(s.expected_label || ''),
+                ),
+              })),
             emptyFieldSuspects: report.steps
               .filter((s) =>
                 /password|e-?mail|preferred|consent|text message|sms/i.test(

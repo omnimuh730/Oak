@@ -7,6 +7,7 @@ import {
 import { fillNativeSelect } from './native-select';
 import { selectComboboxOption } from './select-combobox';
 import { selectRadioElement } from './select-radio';
+import { waitMs } from './wait';
 
 function countRealSelectOptions(select: HTMLSelectElement): number {
   return Array.from(select.options).filter((option) => {
@@ -34,7 +35,10 @@ async function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, text: 
   el.focus();
   const proto =
     el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  const protoDesc = Object.getOwnPropertyDescriptor(proto, 'value');
+  const ownDesc = Object.getOwnPropertyDescriptor(el, 'value');
+  const setter = protoDesc?.set;
+  const rec = el as unknown as { _valueTracker?: { getValue?: () => string; setValue?: (v: string) => void } };
   if (setter) setter.call(el, text);
   else el.value = text;
 
@@ -69,14 +73,33 @@ async function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, text: 
   }
 
   el.dispatchEvent(new Event('blur', { bubbles: true }));
+  const valueLenAfterBlur = String(el.value || '').length;
+  await waitMs(50);
+  const valueLenLater = String(el.value || '').length;
+  const sameNameCount = el.name
+    ? el.ownerDocument.querySelectorAll(`[name="${CSS.escape(el.name)}"]`).length
+    : 1;
   // #region agent log
-  oakDebugLog('C', 'fill.ts:setNativeValue', 'native value after set', {
+  oakDebugLog('J', 'fill.ts:setNativeValue', 'native value after set', {
     type: el instanceof HTMLInputElement ? el.type : 'textarea',
     intendedLen: text.length,
     valueLen: String(el.value || '').length,
+    valueLenAfterBlur,
+    valueLenLater,
+    wiped: valueLenLater === 0 && text.length > 0,
     matched: el.value === text,
     displayed: el.getClientRects().length > 0,
     readOnly: Boolean((el as HTMLInputElement).readOnly),
+    required: Boolean(el.required),
+    ariaInvalid: el.getAttribute('aria-invalid'),
+    inputMode: el.inputMode || '',
+    hasPattern: el instanceof HTMLInputElement && Boolean(el.pattern),
+    maxLength: el.maxLength,
+    hasTracker: Boolean(rec._valueTracker),
+    reactKeyCount: Object.keys(el).filter((k) => k.startsWith('__react')).length,
+    protoSetter: Boolean(setter),
+    ownValueSetter: Boolean(ownDesc?.set),
+    sameNameCount,
     hasJquery: Boolean(win?.jQuery),
     hasDollar: Boolean(win?.$),
     hasAngular: Boolean(win?.angular),
