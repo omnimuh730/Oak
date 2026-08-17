@@ -18,9 +18,23 @@ const SMOOTH_TYPE_DELAY_MS = 45;
 /** Settle time after each typed word so filtered options can render. */
 const WORD_SEARCH_SETTLE_MS = 320;
 const OPTION_WAIT_MS = 3000;
+/** Typeahead lists are large; closed menus already show every choice. */
+const CLOSED_LIST_MAX = 48;
 
 function normalize(text: string): string {
   return text.replace(/\s+/g, ' ').replace(/[–—]/g, '-').trim().toLowerCase();
+}
+
+function errorKind(error?: string): string | undefined {
+  if (!error) return undefined;
+  const e = error.toLowerCase();
+  if (/sign in|unauthorized|401/.test(e)) return 'auth';
+  if (/failed to fetch|networkerror|network/.test(e)) return 'network';
+  if (/port closed|receiving end|no response/.test(e)) return 'port';
+  if (/400|bad request/.test(e)) return 'bad-request';
+  const status = e.match(/failed:\s*(\d{3})/);
+  if (status) return `http-${status[1]}`;
+  return 'other';
 }
 
 function optionText(el: Element): string {
@@ -484,7 +498,7 @@ async function matchFromCandidates(
     confidence: Math.round(aiConfidence * 100),
     optionCount: options.length,
     intendedLen: value.trim().length,
-    error: ai.error ? 'yes' : undefined,
+    errorKind: errorKind(ai.error),
   });
   // #endregion
   if (el && !isProperTokenExtension(value, optionText(el))) {
@@ -539,10 +553,24 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
 
   let { match, score } = await matchFromCandidates(options, value, fieldLabel, null);
   const initialOptions = options;
+  const closedList =
+    initialOptions.length > 0 && initialOptions.length <= CLOSED_LIST_MAX;
 
-  // Word-by-word typing only when initial candidates (local+AI) did not resolve.
+  if (!match && closedList && initialOptions.length === 1) {
+    match = initialOptions[0];
+    score = 1;
+    // #region agent log
+    oakDebugLog('G', 'select-combobox.ts:sole', 'closed list sole option', {
+      optionCount: 1,
+      intendedLen: value.trim().length,
+    });
+    // #endregion
+  }
+
+  // Word-by-word typing only for typeahead (empty or very large lists).
+  // Closed menus already show every candidate — typing filters them away.
   const typeable = resolveTypeableInput(html);
-  if (!match && typeable && value.trim().length >= 2) {
+  if (!match && !closedList && typeable && value.trim().length >= 2) {
     const words = value.trim().split(/\s+/).filter(Boolean);
     let typed = '';
 

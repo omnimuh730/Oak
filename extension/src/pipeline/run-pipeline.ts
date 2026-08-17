@@ -298,6 +298,9 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
             resumeLike: actions.filter((a) =>
               /resume|cv|curriculum/i.test(labelOf(a)),
             ).length,
+            selfIdLike: actions.filter((a) =>
+              /race|ethnic|hispanic|gender|veteran|disabilit/i.test(labelOf(a)),
+            ).length,
             unresolved: (plan.unresolved_items || []).length,
             countryIndex: actions.findIndex((a) =>
               /country|nation/i.test(labelOf(a)),

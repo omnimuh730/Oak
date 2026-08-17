@@ -476,18 +476,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === MSG.MATCH_OPTION) {
-    const body = message.payload as MatchOptionRequest;
+    const incoming = message.payload as MatchOptionRequest;
     const usageTabId = sender.tab?.id;
     (async () => {
       try {
         const base = await getAthensApiUrl();
+    const payload: Record<string, unknown> = {
+      intendedValue: incoming.intendedValue,
+      options: incoming.options.filter(
+        (opt): opt is string => typeof opt === 'string' && opt.trim().length > 0,
+      ),
+    };
+        if (typeof incoming.fieldLabel === 'string' && incoming.fieldLabel.trim()) {
+          payload.fieldLabel = incoming.fieldLabel;
+        }
+        if (typeof incoming.typedQuery === 'string' && incoming.typedQuery.trim()) {
+          payload.typedQuery = incoming.typedQuery;
+        }
         const res = await fetch(`${base}/api/oak/match-option`, {
           method: 'POST',
           headers: await authHeaders(),
-          body: JSON.stringify(body),
+          body: JSON.stringify(payload),
         });
         const data = (await res.json().catch(() => ({}))) as MatchOptionResponse;
         if (!res.ok) {
+          // #region agent log
+          fetch(DEBUG_LOG_INGEST_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Debug-Session-Id': DEBUG_LOG_SESSION_ID,
+            },
+            body: JSON.stringify({
+              sessionId: DEBUG_LOG_SESSION_ID,
+              runId: 'post-fix',
+              hypothesisId: 'G',
+              location: 'background.ts:matchOption',
+              message: 'match-option http error',
+              data: { status: res.status, optionCount: incoming.options?.length ?? 0 },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           sendResponse({
             ok: false,
             matched_option: null,
@@ -502,7 +532,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ) {
           addPipelineUsage(usageTabId, data.usage);
         }
-        sendResponse(data);
+        sendResponse({ ...data, ok: data.ok !== false });
       } catch (err) {
         sendResponse({
           ok: false,
