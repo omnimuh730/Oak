@@ -1,4 +1,5 @@
 import type { DomNode } from '../types';
+import { oakDebugLog } from './debug-log';
 
 // Removed 'IFRAME' from SKIP_TAGS
 export const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT']);
@@ -18,6 +19,8 @@ const MAX_CHILDREN = 120;
 const MAX_TEXT = 120;
 
 let oakIdCounter = 0;
+let childCapHits = 0;
+let depthCapHits = 0;
 
 function tn(el: Element): string {
   return el.tagName.toUpperCase();
@@ -46,6 +49,8 @@ function getChildNodes(el: Element): Node[] {
 
 export function serializeDom(root?: Element): DomNode {
   oakIdCounter = 0;
+  childCapHits = 0;
+  depthCapHits = 0;
 
   // Clean up old Oak IDs across the whole document (including iframes)
   document.querySelectorAll('[data-oak-id]').forEach(el => el.removeAttribute('data-oak-id'));
@@ -58,7 +63,16 @@ export function serializeDom(root?: Element): DomNode {
 
   for (const candidate of candidates) {
     const nodes = serializeNode(candidate, 0);
-    if (nodes && nodes.length > 0) return nodes[0];
+    if (nodes && nodes.length > 0) {
+      // #region agent log
+      oakDebugLog('I', 'dom-serializer.ts:serialize', 'dom serialize caps', {
+        nodeCount: oakIdCounter,
+        childCapHits,
+        depthCapHits,
+      });
+      // #endregion
+      return nodes[0];
+    }
   }
 
   throw new Error('Root element was completely pruned');
@@ -128,9 +142,12 @@ function serializeNode(el: Element, depth: number): DomNode[] {
   const nextDepth = flatten ? depth : depth + 1;
 
   if (nextDepth < MAX_DEPTH) {
+    if (rawChildEls.length > MAX_CHILDREN) childCapHits += 1;
     for (const child of rawChildEls.slice(0, MAX_CHILDREN)) {
       processedChildren.push(...serializeNode(child, nextDepth));
     }
+  } else if (rawChildEls.length) {
+    depthCapHits += 1;
   }
 
   if (flatten) {

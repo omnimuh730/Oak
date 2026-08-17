@@ -533,6 +533,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           addPipelineUsage(usageTabId, data.usage);
         }
         sendResponse({ ...data, ok: data.ok !== false });
+        // #region agent log
+        fetch(DEBUG_LOG_INGEST_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': DEBUG_LOG_SESSION_ID,
+          },
+          body: JSON.stringify({
+            sessionId: DEBUG_LOG_SESSION_ID,
+            runId: 'post-fix',
+            hypothesisId: 'G',
+            location: 'background.ts:matchOption',
+            message: 'match-option http ok',
+            data: {
+              status: res.status,
+              optionCount: incoming.options?.length ?? 0,
+              hasMatch: Boolean(data.matched_option),
+              confidence: typeof data.confidence === 'number'
+                ? Math.round(data.confidence * 100)
+                : 0,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
       } catch (err) {
         sendResponse({
           ok: false,

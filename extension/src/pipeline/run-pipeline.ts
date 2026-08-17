@@ -301,6 +301,12 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
             selfIdLike: actions.filter((a) =>
               /race|ethnic|hispanic|gender|veteran|disabilit/i.test(labelOf(a)),
             ).length,
+            treeHasRace: /identify your race|\brace\b/i.test(pureTree),
+            treeHasGender: /\bgender\b/i.test(pureTree),
+            treeHasHispanic: /hispanic/i.test(pureTree),
+            treeHasPreEmployment: /pre-?employment/i.test(pureTree),
+            comboRoleCount: (pureTree.match(/role=combobox/gi) || []).length,
+            pureChars: pureTree.length,
             unresolved: (plan.unresolved_items || []).length,
             countryIndex: actions.findIndex((a) =>
               /country|nation/i.test(labelOf(a)),
@@ -465,6 +471,7 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     {
       const kind = (message?: string) => {
         const m = String(message || '');
+        if (/no combobox option/i.test(m)) return 'no-combobox-match';
         if (/no select option/i.test(m)) return 'no-option';
         if (/file input/i.test(m)) return 'no-file-input';
         if (/role mismatch/i.test(m)) return 'role-mismatch';
@@ -514,9 +521,11 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
                 status: s.status,
                 kind: kind(s.message),
               })),
-            stateSteps: report.steps
+            selfIdSteps: report.steps
               .filter((s) =>
-                /state|province|region/i.test(String(s.expected_label || '')),
+                /race|ethnic|hispanic|gender|veteran|disabilit/i.test(
+                  String(s.expected_label || ''),
+                ),
               )
               .map((s) => ({
                 action: s.action,

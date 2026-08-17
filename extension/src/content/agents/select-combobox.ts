@@ -570,6 +570,19 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
   // Word-by-word typing only for typeahead (empty or very large lists).
   // Closed menus already show every candidate — typing filters them away.
   const typeable = resolveTypeableInput(html);
+  // #region agent log
+  oakDebugLog('H', 'select-combobox.ts:path', 'combobox match path', {
+    optionCount: initialOptions.length,
+    closedList,
+    hasMatch: Boolean(match),
+    solePick: Boolean(match) && initialOptions.length === 1,
+    willType:
+      !match &&
+      !closedList &&
+      Boolean(typeable) &&
+      value.trim().length >= 2,
+  });
+  // #endregion
   if (!match && !closedList && typeable && value.trim().length >= 2) {
     const words = value.trim().split(/\s+/).filter(Boolean);
     let typed = '';
