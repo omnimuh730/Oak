@@ -2,7 +2,16 @@ import { oakDebugLog } from '../debug-log';
 import { resolveDropdownInteractionTarget } from './enhanced-select';
 import { askAiMatchOption } from './match-option-client';
 import { fillNativeSelect } from './native-select';
+import { pointerActivate } from './pointer-activate';
 import { readControlValue } from './read-control-value';
+import {
+  bestBinaryPolarityMatch,
+  bestMagnitudeRangeMatch,
+  bestScalePolarityMatch,
+  bestUmbrellaMatch,
+  intendedParts,
+  optionStartsWithIntended,
+} from './option-match';
 import {
   OPTION_SIMILARITY_THRESHOLD,
   bestSimilarityMatch,
@@ -56,16 +65,6 @@ function isDisplayed(el: HTMLElement): boolean {
   const style = el.ownerDocument?.defaultView?.getComputedStyle(el);
   if (!style) return Boolean(el.offsetParent);
   return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-}
-
-function pointerClick(el: HTMLElement): void {
-  const view = el.ownerDocument?.defaultView || window;
-  const opts: MouseEventInit = { bubbles: true, cancelable: true, view };
-  el.dispatchEvent(new PointerEvent('pointerdown', opts));
-  el.dispatchEvent(new MouseEvent('mousedown', opts));
-  el.dispatchEvent(new PointerEvent('pointerup', opts));
-  el.dispatchEvent(new MouseEvent('mouseup', opts));
-  el.dispatchEvent(new MouseEvent('click', opts));
 }
 
 function dismissOpenOverlays(doc: Document, control: HTMLElement): void {
@@ -142,17 +141,53 @@ function scoreListbox(listbox: HTMLElement, control: HTMLElement): number {
   );
 }
 
+function nearestComboboxTo(listbox: HTMLElement, doc: Document): HTMLElement | null {
+  const combos = Array.from(
+    doc.querySelectorAll('[role="combobox"], select, [aria-haspopup="listbox"]'),
+  ).filter((node): node is HTMLElement => node instanceof HTMLElement && isDisplayed(node));
+  if (!combos.length) return null;
+  let best: HTMLElement | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const combo of combos) {
+    const score = scoreListbox(listbox, combo);
+    if (score < bestScore) {
+      bestScore = score;
+      best = combo;
+    }
+  }
+  return best;
+}
+
+function listboxServesControl(
+  listbox: HTMLElement,
+  control: HTMLElement,
+  doc: Document,
+): boolean {
+  const nearest = nearestComboboxTo(listbox, doc);
+  if (!nearest) return true;
+  return (
+    nearest === control ||
+    control.contains(nearest) ||
+    nearest.contains(control)
+  );
+}
+
 function pickScopedOptions(control: HTMLElement, doc: Document): HTMLElement[] {
   const owned = listboxRootsForControl(control, doc);
-  for (const root of owned) {
-    // Owned roots may exist before the menu populates; keep falling through.
-    if (!isDisplayed(root) && collectOptionsInRoot(root).length === 0) continue;
-    const options = collectOptionsInRoot(root);
-    if (options.length) return options;
+  if (owned.length) {
+    for (const root of owned) {
+      const options = collectOptionsInRoot(root);
+      if (options.length) return options;
+    }
+    // Owned menu exists but is empty — wait rather than stealing another field's list.
+    return [];
   }
 
   const listboxes = Array.from(doc.querySelectorAll('[role="listbox"]')).filter(
-    (node): node is HTMLElement => node instanceof HTMLElement && isDisplayed(node),
+    (node): node is HTMLElement =>
+      node instanceof HTMLElement &&
+      isDisplayed(node) &&
+      listboxServesControl(node, control, doc),
   );
   listboxes.sort((a, b) => scoreListbox(a, control) - scoreListbox(b, control));
   for (const listbox of listboxes) {
@@ -160,10 +195,8 @@ function pickScopedOptions(control: HTMLElement, doc: Document): HTMLElement[] {
     if (options.length) return options;
   }
 
-  // Last resort: options that share a nearby field container with the control
-  // (Greenhouse/react-select sometimes portals options outside aria-controls).
   const container =
-    control.closest('fieldset, [role="group"], form, label, div') || control.parentElement;
+    control.closest('fieldset, [role="group"], label') || control.parentElement;
   if (container) {
     const local = collectOptionsInRoot(container);
     if (local.length) return local;
@@ -320,6 +353,13 @@ function findLocalMatch(
   options: HTMLElement[],
   value: string,
 ): { match: HTMLElement | null; score: number | null; strategy: string } {
+  return logLocalMatch(matchLocally(options, value), options, value);
+}
+
+function matchLocally(
+  options: HTMLElement[],
+  value: string,
+): { match: HTMLElement | null; score: number | null; strategy: string } {
   const target = normalize(value);
   const targetBare = normalize(stripChoiceMarker(value));
   if (!target) return { match: null, score: null, strategy: 'empty' };
@@ -330,6 +370,28 @@ function findLocalMatch(
     return have === target || haveBare === targetBare;
   });
   if (exact) return { match: exact, score: 1, strategy: 'exact' };
+
+  const binary = bestBinaryPolarityMatch(value, options, optionText);
+  if (binary) return { match: binary, score: 1, strategy: 'binary' };
+
+  const scale = bestScalePolarityMatch(value, options, optionText);
+  if (scale) return { match: scale, score: 1, strategy: 'scale' };
+
+  const umbrella = bestUmbrellaMatch(value, options, optionText);
+  if (umbrella) return { match: umbrella, score: 1, strategy: 'umbrella' };
+
+  const ranged = bestMagnitudeRangeMatch(value, options, optionText);
+  if (ranged) return { match: ranged, score: 1, strategy: 'range' };
+
+  const parts = intendedParts(value).filter((part) => normalize(part) !== target);
+  for (const part of parts) {
+    const partHit = options.find(
+      (opt) =>
+        normalize(stripChoiceMarker(optionText(opt))) === normalize(stripChoiceMarker(part)) ||
+        optionStartsWithIntended(part, optionText(opt)),
+    );
+    if (partHit) return { match: partHit, score: 1, strategy: 'part' };
+  }
 
   if (target.length <= 3) {
     const tokenExact = options.find((opt) => {
@@ -373,11 +435,30 @@ function findLocalMatch(
     const score = stringSimilarity(value, optionText(opt));
     if (!bestBelow || score > bestBelow.score) bestBelow = { text: optionText(opt), score };
   }
-  return {
-    match: null,
+  const result = {
+    match: null as HTMLElement | null,
     score: bestBelow?.score ?? null,
     strategy: bestBelow ? `belowThreshold:${bestBelow.text}` : 'none',
   };
+  return result;
+}
+
+function logLocalMatch(
+  resolved: { match: HTMLElement | null; score: number | null; strategy: string },
+  options: HTMLElement[],
+  value: string,
+): { match: HTMLElement | null; score: number | null; strategy: string } {
+  // #region agent log
+  oakDebugLog('M', 'select-combobox.ts:local', 'local match', {
+    strategy: resolved.strategy.split(':')[0],
+    hasMatch: Boolean(resolved.match),
+    scorePct:
+      resolved.score != null ? Math.round(resolved.score * 100) : null,
+    optionCount: options.length,
+    intendedLen: value.trim().length,
+  });
+  // #endregion
+  return resolved;
 }
 
 function resolveOptionElement(
@@ -394,7 +475,7 @@ function resolveOptionElement(
 async function focusAndOpenCombobox(el: HTMLElement): Promise<void> {
   el.scrollIntoView({ block: 'center', behavior: 'auto' });
   el.focus?.();
-  pointerClick(el);
+  pointerActivate(el);
   await waitMs(80);
   // Clear any leftover filter text so the full option list is visible.
   const input = resolveTypeableInput(el);
@@ -501,7 +582,7 @@ async function matchFromCandidates(
     errorKind: errorKind(ai.error),
   });
   // #endregion
-  if (el && !isProperTokenExtension(value, optionText(el))) {
+  if (el) {
     return {
       match: el,
       score: aiConfidence || 1,
@@ -516,7 +597,11 @@ async function matchFromCandidates(
  * 1) Focus → collect initial candidates → local match → AI match
  * 2) If still unmatched: type one word at a time, wait for filtered list, AI-match again
  */
-export async function selectComboboxOption(el: Element, value: string): Promise<string> {
+export async function selectComboboxOption(
+  el: Element,
+  value: string,
+  fieldHint?: string | null,
+): Promise<string> {
   const requested = el as HTMLElement;
   if (requested instanceof HTMLSelectElement) {
     return fillNativeSelect(requested, value);
@@ -526,7 +611,7 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
     return fillNativeSelect(html, value);
   }
   const doc = html.ownerDocument || document;
-  const fieldLabel =
+  const fromDom =
     html.getAttribute('aria-label') ||
     requested.getAttribute('aria-label') ||
     (html.id
@@ -536,6 +621,12 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
       ? doc.querySelector(`label[for="${CSS.escape(requested.id)}"]`)?.textContent?.trim()
       : null) ||
     null;
+  const fieldLabel =
+    [fieldHint, fromDom]
+      .map((part) => String(part || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .filter((part, i, all) => all.findIndex((other) => other.toLowerCase() === part.toLowerCase()) === i)
+      .join(' ') || null;
 
   dismissOpenOverlays(doc, html);
   await waitMs(40);
@@ -546,6 +637,7 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
     optionCount: options.length,
     intendedLen: value.trim().length,
     intendedIsShort: value.trim().length <= 3,
+    fieldLabelLen: String(fieldLabel || '').length,
     controlTag: html.tagName,
     controlRole: (html.getAttribute('role') || '').toLowerCase(),
   });
@@ -639,7 +731,7 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
   const live = match.isConnected ? match : await findLiveOption(html, doc, label);
   const clickTarget = live || match;
   clickTarget.scrollIntoView({ block: 'nearest', behavior: 'auto' });
-  pointerClick(clickTarget);
+  pointerActivate(clickTarget);
   await waitMs(80);
   dismissOpenOverlays(doc, html);
 

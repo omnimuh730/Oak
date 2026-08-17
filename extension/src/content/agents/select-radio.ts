@@ -2,6 +2,7 @@ import { inferElementRole } from '../verify-element';
 import { oakDebugLog } from '../debug-log';
 import { findAssociatedCombobox, findComboboxForOption } from './enhanced-select';
 import { fillNativeSelect } from './native-select';
+import { pointerActivate, visibleActivateTarget } from './pointer-activate';
 import { selectComboboxOption } from './select-combobox';
 
 function normalize(text: string): string {
@@ -93,13 +94,27 @@ function findAriaChoice(root: ParentNode, value: string): HTMLElement | null {
   return nodes.find((node) => labelsMatch(node, value)) || null;
 }
 
+function findButtonChoice(root: ParentNode, value: string): HTMLElement | null {
+  const nodes = Array.from(
+    root.querySelectorAll('button, [role="button"], [role="radio"], [aria-pressed]'),
+  ).filter((node): node is HTMLElement => node instanceof HTMLElement && isDisplayed(node));
+  return nodes.find((node) => labelsMatch(node, value)) || null;
+}
+
 function ensureChecked(el: HTMLInputElement): string {
-  if (!el.checked) el.click();
-  if (!el.checked) {
-    el.checked = true;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }
+  const target = visibleActivateTarget(el);
+  if (!el.checked) pointerActivate(el);
+  // #region agent log
+  oakDebugLog('K', 'select-radio.ts:ensureChecked', 'choice activate', {
+    inputType: el.type,
+    inputDisplayed: isDisplayed(el),
+    targetTag: target.tagName,
+    targetIsInput: target === el,
+    checkedAfter: el.checked,
+    ariaPressed: target.getAttribute('aria-pressed'),
+    ariaChecked: target.getAttribute('aria-checked'),
+  });
+  // #endregion
   return optionLabel(el) || el.value || 'checked';
 }
 
@@ -166,11 +181,11 @@ export async function selectRadioElement(
 
     const visible = findDisplayedOption(html.closest('[role="listbox"]'), label);
     if (visible) {
-      visible.click();
+      pointerActivate(visible);
       return optionLabel(visible) || label;
     }
     if (isDisplayed(html)) {
-      html.click();
+      pointerActivate(html);
       return optionLabel(html) || label;
     }
     throw new Error(
@@ -195,7 +210,7 @@ export async function selectRadioElement(
       throw new Error(`No checkbox option matching "${intended}"`);
     }
     const check = !intended || wantChecked(intended);
-    if (el.checked !== check) el.click();
+    if (el.checked !== check) pointerActivate(el);
     return String(el.checked);
   }
 
@@ -205,14 +220,14 @@ export async function selectRadioElement(
       const pressed =
         html.getAttribute('aria-checked') === 'true' ||
         html.getAttribute('aria-pressed') === 'true';
-      if (!pressed) html.click();
+      if (!pressed) pointerActivate(html);
       return optionLabel(html) || 'checked';
     }
   }
 
   // Custom choice buttons: the planned node is the option to activate.
   if (el instanceof HTMLButtonElement && intended && labelsMatch(html, intended)) {
-    html.click();
+    pointerActivate(html);
     return optionLabel(html) || intended;
   }
 
@@ -224,8 +239,13 @@ export async function selectRadioElement(
     if (radio) return ensureChecked(radio);
     const aria = findAriaChoice(root, intended);
     if (aria) {
-      aria.click();
+      pointerActivate(aria);
       return optionLabel(aria) || intended;
+    }
+    const button = findButtonChoice(root, intended);
+    if (button) {
+      pointerActivate(button);
+      return optionLabel(button) || intended;
     }
   }
 
@@ -241,6 +261,6 @@ export async function selectRadioElement(
     return selectComboboxOption(el, intended);
   }
 
-  html.click();
+  pointerActivate(html);
   return optionLabel(el) || 'clicked';
 }

@@ -1,11 +1,14 @@
 import { MSG } from './types';
 
 const SEND_TIMEOUT_MS = 20000;
+/** Plan steps may wait on option matching; 20s aborted those clicks mid-run. */
+const PLAN_STEP_TIMEOUT_MS = 120000;
 
 export function sendTabMessage<T = unknown>(
   tabId: number,
   message: unknown,
   frameId?: number,
+  timeoutMs = SEND_TIMEOUT_MS,
 ): Promise<T> {
   return new Promise((resolve) => {
     let settled = false;
@@ -19,9 +22,9 @@ export function sendTabMessage<T = unknown>(
     const timer = setTimeout(() => {
       finish({
         ok: false,
-        error: `Content script timed out after ${SEND_TIMEOUT_MS}ms`,
+        error: `Content script timed out after ${timeoutMs}ms`,
       } as T);
-    }, SEND_TIMEOUT_MS);
+    }, timeoutMs);
 
     const options = frameId == null ? undefined : { frameId };
 
@@ -75,7 +78,7 @@ export async function sendPlanStepToTab(
       details?: Record<string, unknown>;
       /** Frame routing only: this content script is not the form frame. */
       skipped?: boolean;
-    }>(tabId, message, frameId);
+    }>(tabId, message, frameId, PLAN_STEP_TIMEOUT_MS);
   };
 
   if (preferredFrameId != null) {

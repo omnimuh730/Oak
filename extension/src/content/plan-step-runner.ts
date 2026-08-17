@@ -230,7 +230,7 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
         if (intended == null || intended === '') {
           throw new Error('fill requires value');
         }
-        valueAfter = await fillElement(el, intended);
+        valueAfter = await fillElement(el, intended, step.expected_label);
         sendDebugLog('C', 'plan-step-runner.ts:fillActed', 'fill acted', {
           nodeId: step.element_index,
           tag: el.tagName,

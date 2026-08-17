@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Oak",
-  "version": "1.3.8",
+  "version": "1.3.10",
   "description": "Fill forms from the Oak side panel and inspect DOM trees",
   "permissions": ["activeTab", "storage", "scripting", "alarms", "webNavigation", "sidePanel"],
   "side_panel": {

@@ -513,7 +513,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               hypothesisId: 'G',
               location: 'background.ts:matchOption',
               message: 'match-option http error',
-              data: { status: res.status, optionCount: incoming.options?.length ?? 0 },
+              data: {
+                status: res.status,
+                optionCount: incoming.options?.length ?? 0,
+                apiHost: (() => {
+                  try {
+                    return new URL(base).host;
+                  } catch {
+                    return 'invalid';
+                  }
+                })(),
+                errorKind: typeof data.error === 'string' ? data.error.slice(0, 80) : undefined,
+              },
               timestamp: Date.now(),
             }),
           }).catch(() => {});
@@ -549,7 +560,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             data: {
               status: res.status,
               optionCount: incoming.options?.length ?? 0,
+              apiHost: (() => {
+                try {
+                  return new URL(base).host;
+                } catch {
+                  return 'invalid';
+                }
+              })(),
               hasMatch: Boolean(data.matched_option),
+              ok: data.ok !== false,
+              errorKind: typeof data.error === 'string' ? data.error.slice(0, 80) : undefined,
               confidence: typeof data.confidence === 'number'
                 ? Math.round(data.confidence * 100)
                 : 0,

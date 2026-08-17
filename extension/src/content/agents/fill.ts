@@ -112,7 +112,11 @@ async function fillSelect(el: HTMLSelectElement, value: string): Promise<string>
   return fillNativeSelect(el, value);
 }
 
-export async function fillElement(el: Element, value: string): Promise<string> {
+export async function fillElement(
+  el: Element,
+  value: string,
+  fieldHint?: string | null,
+): Promise<string> {
   const html = el as HTMLElement;
   html.scrollIntoView({ block: 'center', behavior: 'auto' });
   html.focus?.();
@@ -143,7 +147,7 @@ export async function fillElement(el: Element, value: string): Promise<string> {
     });
     // #endregion
     if (enhanced && combo && combo !== el) {
-      return selectComboboxOption(combo, value);
+      return selectComboboxOption(combo, value, fieldHint);
     }
     return fillSelect(el, value);
   }
@@ -161,7 +165,7 @@ export async function fillElement(el: Element, value: string): Promise<string> {
     }
     if (looksLikeCombobox(html)) {
       const target = resolveDropdownInteractionTarget(html);
-      return selectComboboxOption(target, value);
+      return selectComboboxOption(target, value, fieldHint);
     }
     await setNativeValue(el, value);
     return el.value;
@@ -178,9 +182,22 @@ export async function fillElement(el: Element, value: string): Promise<string> {
     return html.textContent || value;
   }
 
+  const role = (html.getAttribute('role') || '').toLowerCase();
+  if (
+    el instanceof HTMLButtonElement ||
+    el instanceof HTMLFieldSetElement ||
+    role === 'radio' ||
+    role === 'checkbox' ||
+    role === 'radiogroup' ||
+    role === 'group' ||
+    role === 'switch'
+  ) {
+    return selectRadioElement(el, value);
+  }
+
   if (looksLikeCombobox(html)) {
     const target = resolveDropdownInteractionTarget(html);
-    return selectComboboxOption(target, value);
+    return selectComboboxOption(target, value, fieldHint);
   }
 
   throw new Error(`Unsupported fill target <${el.tagName.toLowerCase()}>`);
