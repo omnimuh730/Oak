@@ -81,6 +81,37 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
   }
 
   if (step.element_index == null) {
+    if (step.action === 'resume_upload' && step.file?.base64) {
+      const root = document.body || document.documentElement;
+      sendDebugLog('C', 'plan-step-runner.ts:resumeNoIndex', 'resume_upload without index', {
+        action: step.action,
+        hasRoot: Boolean(root),
+      });
+      if (!root) {
+        return {
+          ok: false,
+          verified: false,
+          acted: false,
+          error: `${step.action} requires element_index`,
+        };
+      }
+      try {
+        const valueAfter = await resumeUpload(root, step.file, step.expected_label);
+        return {
+          ok: true,
+          verified: true,
+          acted: true,
+          details: { valueAfter },
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          verified: true,
+          acted: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
     return {
       ok: false,
       verified: false,

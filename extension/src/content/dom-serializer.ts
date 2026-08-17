@@ -21,36 +21,52 @@ const MAX_TEXT = 120;
 let oakIdCounter = 0;
 let childCapHits = 0;
 let depthCapHits = 0;
+let fillableHits = 0;
 
 function tn(el: Element): string {
   return el.tagName.toUpperCase();
 }
 
-/** HELPER: Deep traverse into IFRAMES and SHADOW DOMS */
+function uniqueElements(els: Element[]): Element[] {
+  const seen = new Set<Element>();
+  const out: Element[] = [];
+  for (const el of els) {
+    if (seen.has(el)) continue;
+    seen.add(el);
+    out.push(el);
+  }
+  return out;
+}
+
+/** Light-DOM children first, then open shadow roots (hosts can have both). */
 function getChildren(el: Element): Element[] {
   if (el.tagName === 'IFRAME') {
     try {
       const doc = (el as HTMLIFrameElement).contentDocument;
-      // Recurse directly into the iframe's HTML document element
       if (doc && doc.documentElement) return [doc.documentElement];
-    } catch (e) {
-      // Cross-origin iframes (like Stripe) will throw a CORS error here.
-      console.warn('[Oak] Cannot synchronously read cross-origin iframe:', el);
+    } catch {
+      /* cross-origin */
     }
     return [];
   }
-  return Array.from((el.shadowRoot || el).children);
+  const light = Array.from(el.children);
+  const shadow = el.shadowRoot ? Array.from(el.shadowRoot.children) : [];
+  return uniqueElements([...light, ...shadow]);
 }
 
 function getChildNodes(el: Element): Node[] {
-  if (el.tagName === 'IFRAME') return []; // Iframes themselves don't hold meaningful direct text
-  return Array.from((el.shadowRoot || el).childNodes);
+  if (el.tagName === 'IFRAME') return [];
+  const nodes: Node[] = [];
+  if (el.shadowRoot) nodes.push(...Array.from(el.shadowRoot.childNodes));
+  nodes.push(...Array.from(el.childNodes));
+  return nodes;
 }
 
 export function serializeDom(root?: Element): DomNode {
   oakIdCounter = 0;
   childCapHits = 0;
   depthCapHits = 0;
+  fillableHits = 0;
 
   // Clean up old Oak IDs across the whole document (including iframes)
   document.querySelectorAll('[data-oak-id]').forEach(el => el.removeAttribute('data-oak-id'));
@@ -67,6 +83,7 @@ export function serializeDom(root?: Element): DomNode {
       // #region agent log
       oakDebugLog('I', 'dom-serializer.ts:serialize', 'dom serialize caps', {
         nodeCount: oakIdCounter,
+        fillableHits,
         childCapHits,
         depthCapHits,
       });
@@ -156,6 +173,18 @@ function serializeNode(el: Element, depth: number): DomNode[] {
 
   const nodeId = ++oakIdCounter;
   el.setAttribute('data-oak-id', String(nodeId));
+  const role = (el.getAttribute('role') || '').toLowerCase();
+  if (
+    tag === 'input' ||
+    tag === 'select' ||
+    tag === 'textarea' ||
+    role === 'textbox' ||
+    role === 'combobox' ||
+    role === 'searchbox' ||
+    role === 'listbox'
+  ) {
+    fillableHits += 1;
+  }
 
   const classes = el.classList?.length ? Array.from(el.classList).slice(0, 3) : undefined;
   const attrs: Record<string, string> = {};

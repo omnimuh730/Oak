@@ -2,40 +2,67 @@ import { MSG, type PlanStepPayload } from '../types';
 import { serializeDom, getDirectText } from './dom-serializer';
 import { resolveElementByNodeId } from './element-resolver';
 import { executeActions, getElementContent } from './action-runner';
-import { formControlScore, isOakDomFrame } from './form-frame';
+import { oakDebugLog } from './debug-log';
+import {
+  MIN_CHILD_FORM_CONTROLS,
+  formControlScore,
+  isOakDomFrame,
+  waitForFormSurface,
+} from './form-frame';
 import { clearHighlight, highlightElement } from './highlighter';
 import { runPlanStep } from './plan-step-runner';
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.FETCH_DOM) {
-    const oakFrame = isOakDomFrame();
-    const score = formControlScore();
-    if (!oakFrame) {
-      sendResponse({
-        skipped: true,
-        formScore: score,
-        url: window.location.href,
-        title: document.title,
-        fetchedAt: new Date().toISOString(),
-        error: 'Not a form frame',
+    void (async () => {
+      const isTop = window === window.top;
+      const minScore = isTop ? 1 : MIN_CHILD_FORM_CONTROLS;
+      const scoreBefore = formControlScore();
+      const score = await waitForFormSurface(minScore);
+      const oakFrame = isTop || score >= MIN_CHILD_FORM_CONTROLS;
+      let urlHost = 'invalid';
+      try {
+        urlHost = new URL(window.location.href).host;
+      } catch {
+        /* ignore */
+      }
+      // #region agent log
+      oakDebugLog('F', 'index.ts:fetchDom', 'frame surface', {
+        isTop,
+        oakFrame,
+        scoreBefore,
+        score,
+        iframeCount: document.querySelectorAll('iframe').length,
+        readyState: document.readyState,
+        urlHost,
       });
-      return false;
-    }
+      // #endregion
+      if (!oakFrame) {
+        sendResponse({
+          skipped: true,
+          formScore: score,
+          url: window.location.href,
+          title: document.title,
+          fetchedAt: new Date().toISOString(),
+          error: 'Not a form frame',
+        });
+        return;
+      }
 
-    try {
-      const tree = serializeDom();
-      sendResponse({
-        url: window.location.href,
-        title: document.title,
-        tree,
-        formScore: score,
-        fetchedAt: new Date().toISOString(),
-        // sender.frameId is the extension caller; background should attach the real frame id.
-        frameId: sender.frameId ?? null,
-      });
-    } catch (err) {
-      sendResponse({ error: String(err), formScore: score });
-    }
+      try {
+        const tree = serializeDom();
+        sendResponse({
+          url: window.location.href,
+          title: document.title,
+          tree,
+          formScore: score,
+          fetchedAt: new Date().toISOString(),
+          frameId: sender.frameId ?? null,
+        });
+      } catch (err) {
+        sendResponse({ error: String(err), formScore: score });
+      }
+    })();
     return true;
   }
 

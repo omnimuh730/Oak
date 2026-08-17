@@ -107,7 +107,41 @@ async function fetchDomFromTab(
     consider(await attempt(preferredFrameId), preferredFrameId);
   }
   for (const frame of frameList) {
-    consider(await attempt(frame.frameId), frame.frameId);
+    const res = await attempt(frame.frameId);
+    let urlHost = 'invalid';
+    try {
+      if (res?.url) urlHost = new URL(res.url).host;
+      else if (frame.url) urlHost = new URL(frame.url).host;
+    } catch {
+      /* ignore */
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '543c46',
+      },
+      body: JSON.stringify({
+        sessionId: '543c46',
+        runId: 'post-fix',
+        hypothesisId: 'F',
+        location: 'run-pipeline.ts:frameAttempt',
+        message: 'frame fetch attempt',
+        data: {
+          frameId: frame.frameId,
+          parentFrameId: frame.parentFrameId ?? null,
+          urlHost,
+          hasTree: Boolean(res?.tree),
+          skipped: Boolean(res && 'skipped' in res && res.skipped),
+          formScore: typeof res?.formScore === 'number' ? res.formScore : null,
+          hasError: Boolean(res?.error),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    consider(res, frame.frameId);
   }
 
   if (!candidates.length) {
