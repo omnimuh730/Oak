@@ -1,6 +1,8 @@
+import { applyApplicantIdentityToActions } from './applicant-identity';
 import { collectForbiddenIndexes, targetsForbiddenIndex } from './forbidden';
 import { labelLooksLikeOtherDocument } from './resume-field';
 import {
+  executionIndexOrder,
   isExecutableStep,
   missingUploadReason,
   resolveStepFile,
@@ -71,6 +73,7 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
     hooks,
   } = options;
   const files: PlanStepFiles = { runtimeFile, recommendedResume };
+  applyApplicantIdentityToActions(plan.actions);
   const forbidden = collectForbiddenIndexes(plan);
   const stopBeforeSubmit = plan.validation?.stop_before_submit !== false;
 
@@ -87,14 +90,17 @@ export async function runActionPlan(options: RunPlanOptions): Promise<RunReport>
 
   const publish = () => hooks.onSteps([...steps]);
 
-  for (let i = 0; i < (plan.actions ?? []).length; i++) {
+  const actions = plan.actions ?? [];
+  const order = executionIndexOrder(actions);
+
+  for (const i of order) {
     if (aborted) {
       steps[i].status = 'aborted';
       publish();
       continue;
     }
 
-    const action = plan.actions[i];
+    const action = actions[i];
     steps[i].status = 'running';
     publish();
 

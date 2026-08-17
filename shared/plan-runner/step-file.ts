@@ -21,6 +21,26 @@ export function isExecutableStep(action: PlanAction['action']): boolean {
   );
 }
 
+/** Resume/CV and other file inputs — not fill/select/wait. */
+export function isFileUploadAction(action: Pick<PlanAction, 'action'>): boolean {
+  return action.action === 'upload' || action.action === 'resume_upload';
+}
+
+/**
+ * Run file uploads first (original relative order), then every other step
+ * in the AI's original order. Host pages often parse a resume and reset
+ * fields; fills after a completed upload survive that reset.
+ */
+export function executionIndexOrder(actions: PlanAction[]): number[] {
+  const uploads: number[] = [];
+  const rest: number[] = [];
+  for (let i = 0; i < actions.length; i += 1) {
+    if (isFileUploadAction(actions[i])) uploads.push(i);
+    else rest.push(i);
+  }
+  return [...uploads, ...rest];
+}
+
 export function wantsRecommendedResume(action: PlanAction): boolean {
   if (action.action === 'resume_upload') return true;
   if (action.action !== 'upload') return false;

@@ -3,6 +3,8 @@
  * Vendor-agnostic: ARIA roles + id/sibling structure only.
  */
 
+import { oakDebugLog } from '../debug-log';
+
 function isDisplayed(el: HTMLElement): boolean {
   if (el.getClientRects().length === 0) return false;
   const style = el.ownerDocument?.defaultView?.getComputedStyle(el);
@@ -137,6 +139,188 @@ export function findAssociatedCombobox(select: HTMLSelectElement): HTMLElement |
   }
 
   return null;
+}
+
+function tokenIds(value: string | null): string[] {
+  return (value || '')
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function idPrefixesListbox(el: HTMLElement, listboxId: string): boolean {
+  if (!el.id || !listboxId) return false;
+  return (
+    listboxId === el.id ||
+    listboxId.startsWith(`${el.id}_`) ||
+    listboxId.startsWith(`${el.id}-`)
+  );
+}
+
+/**
+ * Listboxes are often owned by a wrapper (aria-owns / aria-controls) that is
+ * not itself role=combobox. The interactive trigger is a sibling in the same cell.
+ */
+function findAriaOwner(listbox: HTMLElement): HTMLElement | null {
+  const id = listbox.id;
+  if (!id) return null;
+  const matches: HTMLElement[] = [];
+  for (const node of Array.from(
+    listbox.ownerDocument.querySelectorAll('[aria-owns], [aria-controls]'),
+  )) {
+    if (!(node instanceof HTMLElement) || node === listbox) continue;
+    const refs = [...tokenIds(node.getAttribute('aria-owns')), ...tokenIds(node.getAttribute('aria-controls'))];
+    if (refs.includes(id)) matches.push(node);
+  }
+  if (!matches.length) return null;
+  const ancestors = matches.filter((el) => el.contains(listbox));
+  const pool = ancestors.length ? ancestors : matches;
+  return pool.reduce((best, el) => (best.contains(el) ? el : best));
+}
+
+function comboboxNearOwner(owner: HTMLElement, option: HTMLElement): HTMLElement | null {
+  const role = (owner.getAttribute('role') || '').toLowerCase();
+  if (role === 'combobox' && owner.getAttribute('aria-hidden') !== 'true') {
+    return resolveDropdownInteractionTarget(owner);
+  }
+  const parent = owner.parentElement;
+  if (!parent || parent.tagName === 'BODY' || parent.tagName === 'HTML') return null;
+  const select = parent.querySelector('select');
+  if (select instanceof HTMLSelectElement) {
+    const linked = findAssociatedCombobox(select);
+    if (linked) return linked;
+    const selects = parent.querySelectorAll('select');
+    if (selects.length === 1) return select;
+  }
+  const combos = comboboxCandidates(parent, option);
+  const displayed = combos.filter(isDisplayed);
+  if (displayed.length === 1) return displayed[0];
+  return pickPreferredCombobox(displayed.length ? displayed : combos);
+}
+
+function comboboxFromFieldRoot(
+  root: HTMLElement,
+  option: HTMLElement,
+  listboxId: string,
+): HTMLElement | null {
+  if (root.tagName === 'BODY' || root.tagName === 'HTML' || root.tagName === 'FORM') {
+    return null;
+  }
+  const selects = Array.from(root.querySelectorAll('select')).filter(
+    (node): node is HTMLSelectElement => node instanceof HTMLSelectElement,
+  );
+  if (selects.length === 1) {
+    return findAssociatedCombobox(selects[0]) || selects[0];
+  }
+  if (listboxId && selects.length > 1) {
+    const linkedSelect = selects.find((el) => idPrefixesListbox(el, listboxId));
+    if (linkedSelect) return findAssociatedCombobox(linkedSelect) || linkedSelect;
+  }
+  const combos = comboboxCandidates(root, option);
+  if (listboxId) {
+    const prefixed = combos.find((el) => idPrefixesListbox(el, listboxId));
+    if (prefixed) return resolveDropdownInteractionTarget(prefixed);
+  }
+  const displayed = combos.filter(isDisplayed);
+  if (displayed.length === 1) return displayed[0];
+  return null;
+}
+
+/**
+ * Pair a role=option / <option> with the combobox that owns its listbox.
+ * Listboxes are often portaled away from the field cell.
+ */
+export function findComboboxForOption(option: HTMLElement): HTMLElement | null {
+  const doc = option.ownerDocument || document;
+  if (option instanceof HTMLOptionElement) {
+    const select = option.closest('select');
+    if (select instanceof HTMLSelectElement) {
+      return findAssociatedCombobox(select) || select;
+    }
+  }
+
+  const listbox = option.closest('[role="listbox"]') as HTMLElement | null;
+  const listboxId = listbox?.id || '';
+  const optionId = option.id || '';
+  let strategy = 'none';
+
+  const ownerByRef = (id: string): HTMLElement | null => {
+    if (!id) return null;
+    const scoped = comboboxCandidates(doc, option);
+    return (
+      scoped.find((el) => {
+        const refs = [
+          ...tokenIds(el.getAttribute('aria-controls')),
+          ...tokenIds(el.getAttribute('aria-owns')),
+        ];
+        const active = el.getAttribute('aria-activedescendant') || '';
+        return refs.includes(id) || active === id;
+      }) || null
+    );
+  };
+
+  const finish = (found: HTMLElement | null, how: string): HTMLElement | null => {
+    // #region agent log
+    oakDebugLog('A', 'enhanced-select.ts:findCombo', 'option-to-combobox', {
+      strategy: found ? how : strategy,
+      hasListbox: Boolean(listbox),
+      listboxIdLen: listboxId.length,
+      hasCombo: Boolean(found),
+      comboTag: found?.tagName || '',
+      comboRole: (found?.getAttribute('role') || '').toLowerCase(),
+      comboDisplayed: found ? isDisplayed(found) : false,
+    });
+    // #endregion
+    return found;
+  };
+
+  const byListbox = ownerByRef(listboxId);
+  if (byListbox) return finish(byListbox, 'combo-aria-ref');
+  const byOption = ownerByRef(optionId);
+  if (byOption) return finish(byOption, 'combo-option-ref');
+
+  for (const combo of comboboxCandidates(doc, option)) {
+    const ids = [
+      ...tokenIds(combo.getAttribute('aria-controls')),
+      ...tokenIds(combo.getAttribute('aria-owns')),
+    ];
+    for (const id of ids) {
+      const root = doc.getElementById(id);
+      if (root && (root === option || root.contains(option))) {
+        return finish(combo, 'combo-contains-option');
+      }
+    }
+  }
+
+  const labelledBy = tokenIds(listbox?.getAttribute('aria-labelledby') || null);
+  for (const id of labelledBy) {
+    const node = doc.getElementById(id);
+    if (node instanceof HTMLElement) {
+      const role = (node.getAttribute('role') || '').toLowerCase();
+      if (role === 'combobox') return finish(node, 'labelledby-combo');
+      const nested = pickPreferredCombobox(comboboxCandidates(node, option));
+      if (nested) return finish(nested, 'labelledby-nested');
+    }
+  }
+
+  if (listbox) {
+    const owner = findAriaOwner(listbox);
+    if (owner) {
+      const near = comboboxNearOwner(owner, option);
+      if (near) return finish(near, 'aria-owner-cell');
+    }
+  }
+
+  let node: HTMLElement | null = listbox || option;
+  for (let depth = 0; depth < 8 && node; depth += 1) {
+    const parent: HTMLElement | null = node.parentElement;
+    if (!parent) break;
+    const fromRoot = comboboxFromFieldRoot(parent, option, listboxId);
+    if (fromRoot) return finish(fromRoot, `ancestor-${depth}`);
+    node = parent;
+  }
+
+  return finish(null, 'none');
 }
 
 function selectHasRealOptions(select: HTMLSelectElement): boolean {

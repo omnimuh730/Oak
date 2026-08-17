@@ -1,4 +1,7 @@
-import { MSG, type PlanStepPayload, type PlanStepResult } from '../types';
+import type { PlanStepPayload, PlanStepResult } from '../types';
+import {
+  rewriteApplicantIdentityValue,
+} from '../../../shared/plan-runner/applicant-identity';
 import { controlAlreadyMatches } from './agents/already-filled';
 import { fillElement } from './agents/fill';
 import { readControlValue } from './agents/read-control-value';
@@ -7,8 +10,9 @@ import { selectRadioElement } from './agents/select-radio';
 import { uploadFileToElement } from './agents/upload';
 import { validateElementIndexes } from './agents/validate';
 import { waitMs } from './agents/wait';
+import { oakDebugLog } from './debug-log';
 import { highlightElement } from './highlighter';
-import { verifyElementByPlan } from './verify-element';
+import { relocateElementByPlan, verifyElementByPlan } from './verify-element';
 
 function sendDebugLog(
   hypothesisId: string,
@@ -16,23 +20,25 @@ function sendDebugLog(
   message: string,
   data: Record<string, unknown>,
 ): void {
-  // #region agent log
-  try {
-    chrome.runtime.sendMessage({
-      type: MSG.DEBUG_LOG,
-      payload: {
-        sessionId: '30bd90',
-        hypothesisId,
-        location,
-        message,
-        data,
-        timestamp: Date.now(),
-      },
-    });
-  } catch {
-    /* ignore */
+  oakDebugLog(hypothesisId, location, message, data);
+}
+
+function nearbyQuestionText(el: Element, expectedLabel: string | null): string {
+  const bits = [expectedLabel || ''];
+  const html = el as HTMLElement;
+  bits.push(html.getAttribute('aria-label') || '');
+  let node: Element | null = el;
+  for (let i = 0; i < 8 && node; i += 1) {
+    bits.push(node.getAttribute('aria-label') || '');
+    const heading = node.querySelector(
+      ':scope > label, :scope > legend, :scope > h1, :scope > h2, :scope > h3, :scope > h4',
+    );
+    if (heading?.textContent) bits.push(heading.textContent);
+    const prev = node.previousElementSibling as HTMLElement | null;
+    if (prev) bits.push(prev.innerText || prev.textContent || '');
+    node = node.parentElement;
   }
-  // #endregion
+  return bits.join(' ');
 }
 
 function intendedPreview(value: string | null | undefined): string | undefined {
@@ -83,33 +89,83 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
     };
   }
 
-  const verified = verifyElementByPlan(
+  let verified = verifyElementByPlan(
     step.element_index,
     step.expected_label,
     step.expected_role,
   );
 
   if (!verified.ok || !verified.element) {
-    sendDebugLog('F', 'plan-step-runner.ts:verifyFailed', 'plan-step verify failed', {
+    const fallback = relocateElementByPlan(
+      step.expected_label,
+      step.expected_role,
+      step.value,
+    );
+    sendDebugLog('I', 'plan-step-runner.ts:relocate', 'stale index relocate', {
       action: step.action,
       nodeId: step.element_index,
-      error: verified.error || 'Verification failed',
-      matchedRole: verified.matchedRole ?? null,
+      indexError: verified.error || 'Verification failed',
+      relocated: fallback.ok,
+      matchRole: fallback.matchedRole ?? null,
+      expectedRole: step.expected_role,
+      expectedLabelLen: String(step.expected_label || '').length,
+      password: /password/i.test(String(step.expected_label || '')),
+      email: /e-?mail/i.test(String(step.expected_label || '')),
+      sms: /text message|sms|consent to receive/i.test(String(step.expected_label || '')),
     });
+    if (fallback.ok && fallback.element) {
+      verified = fallback;
+    } else {
+      sendDebugLog('B', 'plan-step-runner.ts:verifyFailed', 'plan-step verify failed', {
+        action: step.action,
+        nodeId: step.element_index,
+        error: verified.error || 'Verification failed',
+        expectedRole: step.expected_role,
+        matchedRole: verified.matchedRole ?? null,
+        expectedLabelLen: String(step.expected_label || '').length,
+      });
+      return {
+        ok: false,
+        verified: false,
+        acted: false,
+        error: verified.error || 'Verification failed',
+        details: {
+          nodeId: step.element_index,
+          matchedLabel: verified.matchedLabel,
+          matchedRole: verified.matchedRole,
+        },
+      };
+    }
+  }
+
+  const el = verified.element;
+  if (!el) {
     return {
       ok: false,
       verified: false,
       acted: false,
       error: verified.error || 'Verification failed',
-      details: {
-        nodeId: step.element_index,
-        matchedLabel: verified.matchedLabel,
-        matchedRole: verified.matchedRole,
-      },
     };
   }
 
-  highlightElement(verified.element, verified.matchedLabel);
+  highlightElement(el, verified.matchedLabel);
+
+  const questionText = nearbyQuestionText(
+    el,
+    [step.expected_label, verified.matchedLabel].filter(Boolean).join(' '),
+  );
+  let intended = step.value;
+  const identityValue = rewriteApplicantIdentityValue(questionText, intended);
+  if (identityValue !== intended) {
+    sendDebugLog('F', 'plan-step-runner.ts:identityRewrite', 'rewrote AI-tool consent value', {
+      action: step.action,
+      nodeId: step.element_index,
+      fromPreview: intendedPreview(intended),
+      toPreview: intendedPreview(identityValue),
+      questionLen: questionText.length,
+    });
+    intended = identityValue ?? null;
+  }
 
   if (step.action === 'verify_only') {
     return {
@@ -127,40 +183,26 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
   // Resume / browser autofill may already populate the control — don't overwrite
   // when the live value already matches the planned answer.
   if (step.action === 'fill' || step.action === 'select_radio' || step.action === 'upload' || step.action === 'resume_upload') {
-    const prior = controlAlreadyMatches(verified.element, step.value, {
+    const prior = controlAlreadyMatches(el, intended, {
       fileName: step.file?.name ?? null,
     });
-    const html = verified.element as HTMLElement;
-    const input = verified.element instanceof HTMLInputElement ? verified.element : null;
-    // #region agent log
-    try {
-      chrome.runtime.sendMessage({
-        type: MSG.DEBUG_LOG,
-        payload: {
-          sessionId: '30bd90',
-          hypothesisId: prior.matched ? 'B' : 'A',
-          location: 'plan-step-runner.ts:alreadyFilledGate',
-          message: 'plan-step alreadyFilled gate',
-          data: {
-            action: step.action,
-            nodeId: step.element_index,
-            alreadyFilled: prior.matched,
-            matchedRole: verified.matchedRole,
-            tag: verified.element.tagName,
-            role: (html.getAttribute?.('role') || '').toLowerCase(),
-            type: input?.type || '',
-            checked: input ? input.checked : null,
-            ariaChecked: html.getAttribute?.('aria-checked'),
-            ariaPressed: html.getAttribute?.('aria-pressed'),
-            currentLen: String(prior.current || '').length,
-          },
-          timestamp: Date.now(),
-        },
-      });
-    } catch {
-      /* ignore */
-    }
-    // #endregion
+    const html = el as HTMLElement;
+    const input = el instanceof HTMLInputElement ? el : null;
+    sendDebugLog(prior.matched ? 'F' : 'A', 'plan-step-runner.ts:alreadyFilledGate', 'plan-step alreadyFilled gate', {
+      action: step.action,
+      nodeId: step.element_index,
+      alreadyFilled: prior.matched,
+      matchedRole: verified.matchedRole,
+      tag: el.tagName,
+      role: (html.getAttribute?.('role') || '').toLowerCase(),
+      type: input?.type || '',
+      currentLen: String(prior.current || '').length,
+      expectedLabelLen: String(step.expected_label || '').length,
+      password: /password/i.test(String(step.expected_label || '')),
+      email: /e-?mail/i.test(String(step.expected_label || '')),
+      preferred: /preferred/i.test(String(step.expected_label || '')),
+      sms: /text message|sms|consent to receive/i.test(String(step.expected_label || '')),
+    });
     if (prior.matched) {
       return {
         ok: true,
@@ -182,17 +224,25 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
 
     switch (step.action) {
       case 'fill': {
-        if (step.value == null || step.value === '') {
+        if (intended == null || intended === '') {
           throw new Error('fill requires value');
         }
-        valueAfter = await fillElement(verified.element, step.value);
+        valueAfter = await fillElement(el, intended);
+        sendDebugLog('C', 'plan-step-runner.ts:fillActed', 'fill acted', {
+          nodeId: step.element_index,
+          tag: el.tagName,
+          type: el instanceof HTMLInputElement ? el.type : '',
+          valueAfterLen: String(valueAfter || '').length,
+          liveLen: String(readControlValue(el) || '').length,
+          expectedLabelLen: String(step.expected_label || '').length,
+        });
         break;
       }
       case 'upload': {
         if (!step.file?.base64) {
           throw new Error('upload requires runtime file payload');
         }
-        valueAfter = await uploadFileToElement(verified.element, step.file);
+        valueAfter = await uploadFileToElement(el, step.file);
         break;
       }
       case 'resume_upload': {
@@ -200,21 +250,21 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
           throw new Error('resume_upload requires the recommended Library resume');
         }
         valueAfter = await resumeUpload(
-          verified.element,
+          el,
           step.file,
           step.expected_label,
         );
         break;
       }
       case 'select_radio': {
-        valueAfter = await selectRadioElement(verified.element, step.value);
-        const input = verified.element instanceof HTMLInputElement ? verified.element : null;
+        valueAfter = await selectRadioElement(el, intended);
+        const input = el instanceof HTMLInputElement ? el : null;
         sendDebugLog('G', 'plan-step-runner.ts:selectRadioActed', 'select_radio acted', {
           nodeId: step.element_index,
-          tag: verified.element.tagName,
+          tag: el.tagName,
           type: input?.type || '',
           checkedAfter: input ? input.checked : null,
-          intendedPreview: intendedPreview(step.value),
+          intendedPreview: intendedPreview(intended),
           valueAfterLen: String(valueAfter || '').length,
         });
         break;
@@ -223,7 +273,7 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
         throw new Error(`Unsupported plan step action: ${step.action}`);
     }
 
-    const after = valueAfter ?? readControlValue(verified.element);
+    const after = valueAfter ?? readControlValue(el);
     return {
       ok: true,
       verified: true,
@@ -240,9 +290,9 @@ export async function runPlanStep(step: PlanStepPayload): Promise<PlanStepResult
     sendDebugLog('G', 'plan-step-runner.ts:actFailed', 'plan-step act failed', {
       action: step.action,
       nodeId: step.element_index,
-      tag: verified.element.tagName,
+      tag: el.tagName,
       error,
-      intendedPreview: intendedPreview(step.value),
+      intendedPreview: intendedPreview(intended),
     });
     return {
       ok: false,

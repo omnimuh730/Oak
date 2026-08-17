@@ -2,7 +2,18 @@
 export const OPTION_SIMILARITY_THRESHOLD = 0.9;
 
 function normalize(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+  return text.replace(/\s+/g, ' ').replace(/[–—]/g, '-').trim().toLowerCase();
+}
+
+/**
+ * Drop leading choice markers ("A.", "B)", "1.") so lettered MCQ labels
+ * can match an intended answer that omitted the marker.
+ */
+export function stripChoiceMarker(text: string): string {
+  return text
+    .replace(/^\s*[A-Za-z][.)]\s+/, '')
+    .replace(/^\s*\d+[.)]\s+/, '')
+    .trim();
 }
 
 function tokensOf(text: string): string[] {
@@ -133,10 +144,12 @@ export function bestSimilarityMatch<T>(
   threshold: number = OPTION_SIMILARITY_THRESHOLD,
 ): { item: T; score: number } | null {
   let best: { item: T; score: number } | null = null;
+  const want = stripChoiceMarker(target);
   for (const item of candidates) {
     const text = getText(item);
-    if (isProperTokenExtension(target, text)) continue;
-    const score = stringSimilarity(target, text);
+    const have = stripChoiceMarker(text);
+    if (isProperTokenExtension(want, have)) continue;
+    const score = Math.max(stringSimilarity(target, text), stringSimilarity(want, have));
     if (score < threshold) continue;
     if (!best || score > best.score) best = { item, score };
   }

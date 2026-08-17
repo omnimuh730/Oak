@@ -1,7 +1,8 @@
 import type { RuntimeAttachedFile } from '../../types';
+import { oakDebugLog } from '../debug-log';
 import { resolveElementByNodeId } from '../element-resolver';
 import { pageMentionsFilename, rememberUploadedFile } from './upload-registry';
-import { waitMs } from './wait';
+import { waitForUploadComplete, waitMs } from './wait';
 
 function base64ToUint8Array(base64: string): Uint8Array {
   const binary = atob(base64);
@@ -120,6 +121,12 @@ async function persistUploadAcrossRemount(
     if (target.isConnected && (target.files?.length ?? 0) > 0) {
       if (oakId) target.setAttribute('data-oak-id', oakId);
       rememberUploadedFile(oakId, fileName);
+      // #region agent log
+      oakDebugLog('C', 'upload.ts:persistEarly', 'upload files remained on input', {
+        attempt,
+        fileCount: target.files?.length ?? 0,
+      });
+      // #endregion
       return { names: Array.from(target.files ?? []).map((f) => f.name), input: target };
     }
 
@@ -153,6 +160,15 @@ async function persistUploadAcrossRemount(
 
   const evidenced = await waitForUploadEvidence(doc, fileName, oakId, 4000);
 
+  // #region agent log
+  oakDebugLog('C', 'upload.ts:persist', 'upload persist result', {
+    evidenced,
+    targetConnected: target.isConnected,
+    targetFileCount: target.files?.length ?? 0,
+    pageMentions: pageMentionsFilename(doc, fileName),
+  });
+  // #endregion
+
   if (evidenced) {
     rememberUploadedFile(oakId, fileName);
     const resolved = oakId ? resolveElementByNodeId(Number(oakId)) : null;
@@ -184,5 +200,12 @@ export async function uploadFileToElement(
     throw new Error('File was not attached to input');
   }
   rememberUploadedFile(oakId, names[0]);
+  const settle = await waitForUploadComplete(el.ownerDocument || document);
+  // #region agent log
+  oakDebugLog('H', 'upload.ts:settle', 'waited for upload/parse to finish', {
+    fileCount: names.length,
+    ...settle,
+  });
+  // #endregion
   return names.join(', ');
 }

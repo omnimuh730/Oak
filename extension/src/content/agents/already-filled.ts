@@ -1,4 +1,4 @@
-import { MSG } from '../../types';
+import { oakDebugLog } from '../debug-log';
 import { isChoiceSelected, isChoiceWidget } from './choice-state';
 import { readControlValue } from './read-control-value';
 
@@ -57,14 +57,6 @@ function elementSnapshot(el: Element): Record<string, unknown> {
   };
 }
 
-function sendAgentLog(payload: Record<string, unknown>): void {
-  try {
-    chrome.runtime.sendMessage({ type: MSG.DEBUG_LOG, payload });
-  } catch {
-    /* ignore */
-  }
-}
-
 function debugAlreadyFilled(
   hypothesisId: string,
   branch: string,
@@ -74,19 +66,12 @@ function debugAlreadyFilled(
   el: Element,
 ): { matched: boolean; current: string } {
   // #region agent log
-  sendAgentLog({
-    sessionId: '30bd90',
-    hypothesisId,
-    location: 'already-filled.ts:controlAlreadyMatches',
-    message: 'already-match decision',
-    data: {
-      branch,
-      matched,
-      intended: safePreview(intended),
-      current: safePreview(current),
-      ...elementSnapshot(el),
-    },
-    timestamp: Date.now(),
+  oakDebugLog(hypothesisId, 'already-filled.ts:controlAlreadyMatches', 'already-match decision', {
+    branch,
+    matched,
+    intended: safePreview(intended),
+    current: safePreview(current),
+    ...elementSnapshot(el),
   });
   // #endregion
   return { matched, current };

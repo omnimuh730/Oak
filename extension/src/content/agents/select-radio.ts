@@ -1,5 +1,7 @@
 import { inferElementRole } from '../verify-element';
-import { findAssociatedCombobox } from './enhanced-select';
+import { oakDebugLog } from '../debug-log';
+import { findAssociatedCombobox, findComboboxForOption } from './enhanced-select';
+import { fillNativeSelect } from './native-select';
 import { selectComboboxOption } from './select-combobox';
 
 function normalize(text: string): string {
@@ -43,6 +45,24 @@ function isBooleanIntent(value: string): boolean {
 
 function wantChecked(value: string): boolean {
   return /^(true|yes|1|on|checked)$/i.test(value.trim());
+}
+
+function isDisplayed(el: HTMLElement): boolean {
+  if (el.getClientRects().length === 0) return false;
+  const style = el.ownerDocument?.defaultView?.getComputedStyle(el);
+  if (!style) return Boolean(el.offsetParent);
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+}
+
+function findDisplayedOption(
+  listbox: Element | null,
+  value: string,
+): HTMLElement | null {
+  if (!listbox) return null;
+  const nodes = Array.from(listbox.querySelectorAll('[role="option"]')).filter(
+    (node): node is HTMLElement => node instanceof HTMLElement && isDisplayed(node),
+  );
+  return nodes.find((node) => labelsMatch(node, value)) || null;
 }
 
 function groupRoot(el: HTMLElement): ParentNode {
@@ -95,6 +115,19 @@ export async function selectRadioElement(
   html.scrollIntoView({ block: 'center', behavior: 'auto' });
 
   const role = inferElementRole(el);
+  if (el instanceof HTMLSelectElement && value) {
+    const combo = findAssociatedCombobox(el);
+    // #region agent log
+    oakDebugLog('D', 'select-radio.ts:nativeSelect', 'select_radio native select', {
+      hasCombo: Boolean(combo && combo !== el),
+      comboTag: combo && combo !== el ? combo.tagName : '',
+      optionCount: el.options.length,
+      intendedLen: value.trim().length,
+    });
+    // #endregion
+    if (combo && combo !== el) return selectComboboxOption(combo, value);
+    return fillNativeSelect(el, value);
+  }
   if ((role === 'combobox' || html.getAttribute('aria-haspopup') === 'listbox') && value) {
     return selectComboboxOption(el, value);
   }
@@ -118,27 +151,31 @@ export async function selectRadioElement(
       }
     }
 
-    const listbox = html.closest('[role="listbox"]');
-    const field =
-      (listbox?.parentElement as HTMLElement | null) ||
-      html.parentElement ||
-      html;
-    const nearSelect = field.querySelector('select');
-    const comboFromSelect =
-      nearSelect instanceof HTMLSelectElement
-        ? findAssociatedCombobox(nearSelect)
-        : null;
-    const combo =
-      comboFromSelect ||
-      (field.querySelector(
-        '[role="combobox"]:not([aria-hidden="true"])',
-      ) as HTMLElement | null) ||
-      (field.parentElement?.querySelector(
-        '[role="combobox"]:not([aria-hidden="true"])',
-      ) as HTMLElement | null);
+    const combo = findComboboxForOption(html);
+    // #region agent log
+    oakDebugLog('A', 'select-radio.ts:option', 'option selection path', {
+      hasCombo: Boolean(combo),
+      comboTag: combo?.tagName || '',
+      comboRole: (combo?.getAttribute('role') || '').toLowerCase(),
+      optionDisplayed: isDisplayed(html),
+      intendedLen: label.length,
+      intendedPreview: /^(yes|no)$/i.test(label) ? label : undefined,
+    });
+    // #endregion
     if (combo && label) return selectComboboxOption(combo, label);
-    html.click();
-    return optionLabel(html) || label;
+
+    const visible = findDisplayedOption(html.closest('[role="listbox"]'), label);
+    if (visible) {
+      visible.click();
+      return optionLabel(visible) || label;
+    }
+    if (isDisplayed(html)) {
+      html.click();
+      return optionLabel(html) || label;
+    }
+    throw new Error(
+      `Dropdown option "${label}" is not open — no combobox trigger found`,
+    );
   }
 
   if (el instanceof HTMLInputElement && el.type === 'radio') {

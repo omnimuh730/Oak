@@ -1,5 +1,7 @@
 import { formatDuration, formatUsd } from '../../../shared/ai-usage';
+import { applyApplicantIdentityToActions } from '../../../shared/plan-runner/applicant-identity';
 import { runActionPlan } from '../../../shared/plan-runner/orchestrator';
+import { executionIndexOrder } from '../../../shared/plan-runner/step-file';
 import type {
   ActionPlan,
   PauseRequest,
@@ -122,7 +124,36 @@ async function fetchDomFromTab(
     return (b.frameId ?? 0) - (a.frameId ?? 0);
   });
 
-  return candidates[0];
+  const picked = candidates[0];
+  // #region agent log
+  fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': '543c46',
+    },
+    body: JSON.stringify({
+      sessionId: '543c46',
+      runId: 'post-fix',
+      hypothesisId: 'F',
+      location: 'run-pipeline.ts:fetchDom',
+      message: 'picked form frame',
+      data: {
+        frameCount: frameList.length,
+        candidateCount: candidates.length,
+        preferredFrameId: preferredFrameId ?? null,
+        pickedFrameId: picked.frameId ?? null,
+        pickedScore: picked.formScore,
+        scores: candidates.slice(0, 8).map((c) => ({
+          frameId: c.frameId ?? null,
+          formScore: c.formScore,
+        })),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  return picked;
 }
 
 export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
@@ -228,8 +259,97 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     addPipelineUsage(tabId, analyze.usage);
 
     const plan = analyze.plan as ActionPlan;
+    applyApplicantIdentityToActions(plan.actions);
     planSnapshot = plan;
     const stepTotal = plan.actions?.length ?? 0;
+    // #region agent log
+    {
+      const actions = plan.actions ?? [];
+      const labelOf = (action: (typeof actions)[number]) =>
+        String(action.expected_label || '');
+      fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '543c46',
+        },
+        body: JSON.stringify({
+          sessionId: '543c46',
+          runId: 'post-fix',
+          hypothesisId: 'G',
+          location: 'run-pipeline.ts:plan',
+          message: 'analyze plan summary',
+          data: {
+            actionCount: actions.length,
+            resumeUpload: actions.filter((a) => a.action === 'resume_upload').length,
+            upload: actions.filter((a) => a.action === 'upload').length,
+            fill: actions.filter((a) => a.action === 'fill').length,
+            fileUploadIndexes: actions
+              .map((a, i) =>
+                a.action === 'upload' || a.action === 'resume_upload' ? i : -1,
+              )
+              .filter((i) => i >= 0),
+            execOrderHead: executionIndexOrder(actions).slice(0, 6),
+            stateLike: actions.filter((a) =>
+              /state|province|region/i.test(labelOf(a)),
+            ).length,
+            countryLike: actions.filter((a) => /country|nation/i.test(labelOf(a)))
+              .length,
+            resumeLike: actions.filter((a) =>
+              /resume|cv|curriculum/i.test(labelOf(a)),
+            ).length,
+            unresolved: (plan.unresolved_items || []).length,
+            countryIndex: actions.findIndex((a) =>
+              /country|nation/i.test(labelOf(a)),
+            ),
+            stateIndex: actions.findIndex((a) =>
+              /state|province|region/i.test(labelOf(a)),
+            ),
+            hasResumeFile: Boolean(recommendedResume),
+            aiToolLike: actions
+              .filter((a) =>
+                /\b(ai|artificial intelligence|automated employment|automated decision|automated screening|automated tool)\b/i.test(
+                  labelOf(a),
+                ),
+              )
+              .map((a) => ({
+                action: a.action,
+                labelLen: labelOf(a).length,
+                intendedPreview: /^(yes|no|true|false)$/i.test(
+                  String(a.value || '').trim(),
+                )
+                  ? String(a.value).trim()
+                  : undefined,
+                intendedLen: String(a.value || '').length,
+              })),
+            yesNoSteps: actions
+              .filter((a) => /^(yes|no)$/i.test(String(a.value || '').trim()))
+              .map((a) => ({
+                action: a.action,
+                preview: String(a.value).trim(),
+                labelLen: labelOf(a).length,
+              })),
+            emptyFieldSuspects: actions
+              .filter((a) =>
+                /password|e-?mail|preferred|consent|text message|sms/i.test(
+                  labelOf(a),
+                ),
+              )
+              .map((a) => ({
+                action: a.action,
+                labelLen: labelOf(a).length,
+                intendedLen: String(a.value || '').length,
+                password: /password/i.test(labelOf(a)),
+                email: /e-?mail/i.test(labelOf(a)),
+                preferred: /preferred/i.test(labelOf(a)),
+                sms: /text message|sms|consent to receive/i.test(labelOf(a)),
+              })),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
 
     emit({
       phase: 'running',
@@ -338,6 +458,92 @@ export async function runFabPipeline(args: RunPipelineArgs): Promise<void> {
     const resultLabel = report.ok
       ? `${summary.ok} ok`
       : `${summary.ok} ok, ${summary.skipped} skipped`;
+    // #region agent log
+    {
+      const kind = (message?: string) => {
+        const m = String(message || '');
+        if (/no select option/i.test(m)) return 'no-option';
+        if (/file input/i.test(m)) return 'no-file-input';
+        if (/role mismatch/i.test(m)) return 'role-mismatch';
+        if (/label mismatch/i.test(m)) return 'label-mismatch';
+        if (/already=/i.test(m) || /already filled/i.test(m)) return 'already-filled';
+        if (/did not persist/i.test(m)) return 'upload-remount';
+        if (/no combobox trigger/i.test(m)) return 'no-combobox';
+        if (/verification failed|element not found|index not found/i.test(m)) {
+          return 'verify-miss';
+        }
+        if (/timed out/i.test(m)) return 'timeout';
+        if (/not a form frame/i.test(m)) return 'wrong-frame';
+        return m ? 'other' : 'none';
+      };
+      fetch('http://127.0.0.1:7376/ingest/22f9a3b0-687c-4d12-9d88-2e1dc29aae31', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '543c46',
+        },
+        body: JSON.stringify({
+          sessionId: '543c46',
+          runId: 'post-fix',
+          hypothesisId: 'A',
+          location: 'run-pipeline.ts:done',
+          message: 'plan run summary',
+          data: {
+            ok: report.ok,
+            aborted: report.aborted,
+            summary,
+            notOk: report.steps
+              .filter((s) => s.status !== 'ok')
+              .map((s) => ({
+                action: s.action,
+                status: s.status,
+                kind: kind(s.message),
+              })),
+            resumeSteps: report.steps
+              .filter(
+                (s) =>
+                  s.action === 'resume_upload' ||
+                  s.action === 'upload' ||
+                  /resume|cv|curriculum/i.test(String(s.expected_label || '')),
+              )
+              .map((s) => ({
+                action: s.action,
+                status: s.status,
+                kind: kind(s.message),
+              })),
+            stateSteps: report.steps
+              .filter((s) =>
+                /state|province|region/i.test(String(s.expected_label || '')),
+              )
+              .map((s) => ({
+                action: s.action,
+                status: s.status,
+                kind: kind(s.message),
+              })),
+            emptyFieldSuspects: report.steps
+              .filter((s) =>
+                /password|e-?mail|preferred|consent|text message|sms/i.test(
+                  String(s.expected_label || ''),
+                ),
+              )
+              .map((s) => ({
+                action: s.action,
+                status: s.status,
+                kind: kind(s.message),
+                alreadyFilled: /already/i.test(String(s.message || '')),
+                password: /password/i.test(String(s.expected_label || '')),
+                email: /e-?mail/i.test(String(s.expected_label || '')),
+                preferred: /preferred/i.test(String(s.expected_label || '')),
+                sms: /text message|sms|consent to receive/i.test(
+                  String(s.expected_label || ''),
+                ),
+              })),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
 
     emit({
       phase: 'done',

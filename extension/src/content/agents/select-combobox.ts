@@ -1,5 +1,7 @@
+import { oakDebugLog } from '../debug-log';
 import { resolveDropdownInteractionTarget } from './enhanced-select';
 import { askAiMatchOption } from './match-option-client';
+import { fillNativeSelect } from './native-select';
 import { readControlValue } from './read-control-value';
 import {
   OPTION_SIMILARITY_THRESHOLD,
@@ -7,6 +9,7 @@ import {
   isProperTokenExtension,
   isTokenPrefixMatch,
   stringSimilarity,
+  stripChoiceMarker,
 } from './string-similarity';
 import { waitMs } from './wait';
 
@@ -17,7 +20,7 @@ const WORD_SEARCH_SETTLE_MS = 320;
 const OPTION_WAIT_MS = 3000;
 
 function normalize(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+  return text.replace(/\s+/g, ' ').replace(/[–—]/g, '-').trim().toLowerCase();
 }
 
 function optionText(el: Element): string {
@@ -169,34 +172,174 @@ async function waitForScopedOptions(
   return pickScopedOptions(control, doc);
 }
 
+function optionSignature(options: HTMLElement[]): string {
+  return options.map((opt) => normalize(optionText(opt))).join('\n');
+}
+
+async function waitForStableOptions(
+  control: HTMLElement,
+  doc: Document,
+  maxMs = OPTION_WAIT_MS,
+): Promise<HTMLElement[]> {
+  const started = Date.now();
+  let lastSig = '';
+  let stableAt = Date.now();
+  let last: HTMLElement[] = [];
+  while (Date.now() - started < maxMs) {
+    const options = pickScopedOptions(control, doc);
+    const sig = optionSignature(options);
+    if (sig !== lastSig) {
+      lastSig = sig;
+      stableAt = Date.now();
+      last = options;
+    } else if (options.length && Date.now() - stableAt >= 200) {
+      return options;
+    }
+    await waitMs(50);
+  }
+  return last.length ? last : pickScopedOptions(control, doc);
+}
+
+function displayedListboxes(control: HTMLElement, doc: Document): HTMLElement[] {
+  const owned = listboxRootsForControl(control, doc).filter(
+    (node) => isDisplayed(node) || collectOptionsInRoot(node).length > 0,
+  );
+  if (owned.length) return owned;
+  return Array.from(doc.querySelectorAll('[role="listbox"]')).filter(
+    (node): node is HTMLElement => node instanceof HTMLElement && isDisplayed(node),
+  );
+}
+
+async function collectOptionsByScrolling(
+  control: HTMLElement,
+  doc: Document,
+): Promise<HTMLElement[]> {
+  const byKey = new Map<string, HTMLElement>();
+  const add = (opts: HTMLElement[]) => {
+    for (const opt of opts) {
+      const key = normalize(optionText(opt));
+      if (key && !byKey.has(key)) byKey.set(key, opt);
+    }
+  };
+
+  add(pickScopedOptions(control, doc));
+  const boxes = displayedListboxes(control, doc);
+  const scrollTargets = new Set<HTMLElement>();
+  for (const box of boxes) {
+    if (box.scrollHeight > box.clientHeight + 8) scrollTargets.add(box);
+    for (const child of Array.from(box.children)) {
+      if (child instanceof HTMLElement && child.scrollHeight > child.clientHeight + 8) {
+        scrollTargets.add(child);
+      }
+    }
+  }
+
+  const targets = scrollTargets.size ? [...scrollTargets] : boxes;
+  for (const box of targets) {
+    const maxScroll = Math.max(0, box.scrollHeight - box.clientHeight);
+    if (maxScroll <= 0) {
+      add(collectOptionsInRoot(box));
+      continue;
+    }
+    const steps = 10;
+    for (let i = 0; i <= steps; i += 1) {
+      box.scrollTop = (maxScroll * i) / steps;
+      await waitMs(40);
+      add(collectOptionsInRoot(box));
+      add(pickScopedOptions(control, doc));
+    }
+    box.scrollTop = 0;
+  }
+  return Array.from(byKey.values());
+}
+
+async function findLiveOption(
+  control: HTMLElement,
+  doc: Document,
+  label: string,
+): Promise<HTMLElement | null> {
+  const want = normalize(label);
+  const visible = pickScopedOptions(control, doc).find(
+    (opt) => normalize(optionText(opt)) === want,
+  );
+  if (visible?.isConnected) return visible;
+
+  const scrolled = await collectOptionsByScrolling(control, doc);
+  const live = scrolled.find(
+    (opt) => opt.isConnected && normalize(optionText(opt)) === want,
+  );
+  if (live) return live;
+
+  const boxes = displayedListboxes(control, doc);
+  for (const box of boxes) {
+    const maxScroll = Math.max(0, box.scrollHeight - box.clientHeight);
+    const steps = 10;
+    for (let i = 0; i <= steps; i += 1) {
+      box.scrollTop = maxScroll ? (maxScroll * i) / steps : 0;
+      await waitMs(40);
+      const hit = collectOptionsInRoot(box).find(
+        (opt) => opt.isConnected && normalize(optionText(opt)) === want,
+      );
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+async function openAndCollectOptions(
+  html: HTMLElement,
+  doc: Document,
+): Promise<HTMLElement[]> {
+  await focusAndOpenCombobox(html);
+  let options = await waitForStableOptions(html, doc);
+  if (!options.length) {
+    html.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+    );
+    options = await waitForStableOptions(html, doc);
+  }
+  const scrolled = await collectOptionsByScrolling(html, doc);
+  return scrolled.length >= options.length ? scrolled : options;
+}
+
 function findLocalMatch(
   options: HTMLElement[],
   value: string,
 ): { match: HTMLElement | null; score: number | null; strategy: string } {
   const target = normalize(value);
+  const targetBare = normalize(stripChoiceMarker(value));
   if (!target) return { match: null, score: null, strategy: 'empty' };
 
-  const exact = options.find((opt) => normalize(optionText(opt)) === target);
+  const exact = options.find((opt) => {
+    const have = normalize(optionText(opt));
+    const haveBare = normalize(stripChoiceMarker(optionText(opt)));
+    return have === target || haveBare === targetBare;
+  });
   if (exact) return { match: exact, score: 1, strategy: 'exact' };
 
   if (target.length <= 3) {
     const tokenExact = options.find((opt) => {
-      const tokens = normalize(optionText(opt)).split(/[^a-z0-9]+/).filter(Boolean);
-      return tokens.includes(target);
+      const tokens = normalize(stripChoiceMarker(optionText(opt)))
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+      if (tokens.length > 4) return false;
+      return tokens.includes(target) || tokens.includes(targetBare);
     });
     if (tokenExact) return { match: tokenExact, score: 1, strategy: 'tokenExact' };
   }
 
-  if (target.length >= 4) {
+  if (targetBare.length >= 4) {
     // Same answer with longer wording (disability / veteran blurbs), or country "+1".
     // Do NOT require 90% edit similarity — long trailing text tanks Levenshtein.
     const prefix = options.find((opt) => {
-      const label = optionText(opt);
+      const label = stripChoiceMarker(optionText(opt));
       if (isProperTokenExtension(value, label)) return false;
-      if (isTokenPrefixMatch(value, label)) return true;
+      if (isTokenPrefixMatch(targetBare, label) || isTokenPrefixMatch(value, optionText(opt))) {
+        return true;
+      }
       const text = normalize(label);
-      if (text.startsWith(target)) return true;
-      if (text.includes(`${target}+`) || text.startsWith(`${target} +`)) return true;
+      if (text.startsWith(targetBare)) return true;
+      if (text.includes(`${targetBare}+`) || text.startsWith(`${targetBare} +`)) return true;
       return false;
     });
     if (prefix) {
@@ -331,15 +474,25 @@ async function matchFromCandidates(
 
   const aiConfidence =
     typeof ai.confidence === 'number' ? ai.confidence : 0;
-  if (ai.matched_option && aiConfidence >= OPTION_SIMILARITY_THRESHOLD) {
-    const el = resolveOptionElement(options, ai.matched_option);
-    if (el && !isProperTokenExtension(value, optionText(el))) {
-      return {
-        match: el,
-        score: aiConfidence,
-        strategy: 'ai',
-      };
-    }
+  const el = ai.matched_option
+    ? resolveOptionElement(options, ai.matched_option)
+    : null;
+  // #region agent log
+  oakDebugLog('G', 'select-combobox.ts:ai', 'combobox AI match', {
+    ok: Boolean(ai.ok),
+    hasPick: Boolean(el),
+    confidence: Math.round(aiConfidence * 100),
+    optionCount: options.length,
+    intendedLen: value.trim().length,
+    error: ai.error ? 'yes' : undefined,
+  });
+  // #endregion
+  if (el && !isProperTokenExtension(value, optionText(el))) {
+    return {
+      match: el,
+      score: aiConfidence || 1,
+      strategy: 'ai',
+    };
   }
 
   return { match: null, score: local.score, strategy: local.strategy };
@@ -351,7 +504,13 @@ async function matchFromCandidates(
  */
 export async function selectComboboxOption(el: Element, value: string): Promise<string> {
   const requested = el as HTMLElement;
+  if (requested instanceof HTMLSelectElement) {
+    return fillNativeSelect(requested, value);
+  }
   const html = resolveDropdownInteractionTarget(requested);
+  if (html instanceof HTMLSelectElement) {
+    return fillNativeSelect(html, value);
+  }
   const doc = html.ownerDocument || document;
   const fieldLabel =
     html.getAttribute('aria-label') ||
@@ -366,17 +525,20 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
 
   dismissOpenOverlays(doc, html);
   await waitMs(40);
-  await focusAndOpenCombobox(html);
+  let options = await openAndCollectOptions(html, doc);
 
-  let options = await waitForScopedOptions(html, doc);
-  if (!options.length) {
-    html.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
-    );
-    options = await waitForScopedOptions(html, doc);
-  }
+  // #region agent log
+  oakDebugLog('D', 'select-combobox.ts:options', 'combobox options after open', {
+    optionCount: options.length,
+    intendedLen: value.trim().length,
+    intendedIsShort: value.trim().length <= 3,
+    controlTag: html.tagName,
+    controlRole: (html.getAttribute('role') || '').toLowerCase(),
+  });
+  // #endregion
 
   let { match, score } = await matchFromCandidates(options, value, fieldLabel, null);
+  const initialOptions = options;
 
   // Word-by-word typing only when initial candidates (local+AI) did not resolve.
   const typeable = resolveTypeableInput(html);
@@ -388,8 +550,14 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
       typed = typed ? `${typed} ${word}` : word;
       await focusAndOpenCombobox(html);
       await typeQueryIntoOpenCombobox(html, typed);
-      options = await waitForScopedOptions(html, doc, 2000);
-
+      const filtered = await waitForScopedOptions(html, doc, 2000);
+      if (!filtered.length) {
+        options = initialOptions.length
+          ? initialOptions
+          : await openAndCollectOptions(html, doc);
+        break;
+      }
+      options = filtered;
       const resolved = await matchFromCandidates(options, value, fieldLabel, typed);
       match = resolved.match;
       score = resolved.score;
@@ -398,25 +566,56 @@ export async function selectComboboxOption(el: Element, value: string): Promise<
   }
 
   if (!match) {
+    dismissOpenOverlays(doc, html);
+    await waitMs(450);
+    options = await openAndCollectOptions(html, doc);
+    // #region agent log
+    oakDebugLog('D', 'select-combobox.ts:retry', 'combobox options after cascade retry', {
+      optionCount: options.length,
+      intendedLen: value.trim().length,
+    });
+    // #endregion
+    const resolved = await matchFromCandidates(options, value, fieldLabel, null);
+    match = resolved.match;
+    score = resolved.score;
+  }
+
+  if (!match) {
     const bestPct =
       score != null
         ? ` (best ${(score * 100).toFixed(1)}% < ${OPTION_SIMILARITY_THRESHOLD * 100}%)`
         : '';
+    const sawFrom = options.length ? options : initialOptions;
     throw new Error(
-      `No combobox option matching "${value}"${bestPct} (saw: ${options
+      `No combobox option matching "${value}"${bestPct} (saw: ${sawFrom
         .slice(0, 6)
         .map(optionText)
         .join(' | ')})`,
     );
   }
 
-  match.scrollIntoView({ block: 'nearest', behavior: 'auto' });
-  pointerClick(match);
+  const label = optionText(match);
+  const live = match.isConnected ? match : await findLiveOption(html, doc, label);
+  const clickTarget = live || match;
+  clickTarget.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  pointerClick(clickTarget);
   await waitMs(80);
   dismissOpenOverlays(doc, html);
 
+  const displayed = readControlValue(html);
+  // #region agent log
+  oakDebugLog('D', 'select-combobox.ts:afterClick', 'combobox value after option click', {
+    intendedLen: value.trim().length,
+    displayedLen: String(displayed || '').length,
+    looksPlaceholder: !displayed,
+    controlTag: html.tagName,
+    controlRole: (html.getAttribute('role') || '').toLowerCase(),
+    intendedPreview: /^(yes|no)$/i.test(value.trim()) ? value.trim() : undefined,
+  });
+  // #endregion
+
   return (
-    readControlValue(html) ||
+    displayed ||
     (html instanceof HTMLInputElement && html.value) ||
     html.getAttribute('data-value') ||
     optionText(match)

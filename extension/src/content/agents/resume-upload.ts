@@ -1,4 +1,5 @@
 import type { RuntimeAttachedFile } from '../../types';
+import { oakDebugLog } from '../debug-log';
 import { uploadFileToElement } from './upload';
 import {
   documentFieldKind,
@@ -71,6 +72,16 @@ function resolveResumeFileInput(
   el: Element,
   expectedLabel: string | null | undefined,
 ): HTMLInputElement {
+  // resume_upload already means this control is a Resume/CV field. Hidden
+  // picker inputs often have no Resume/CV tokens in name/id/headings, so
+  // kind ranking must not reject the live file input the planner targeted.
+  if (isFileInput(el) && combinedKind(el, el, expectedLabel) !== 'other') {
+    return el;
+  }
+  if (isFileInput(el) && !labelLooksLikeOtherDocument(expectedLabel)) {
+    return el;
+  }
+
   const ranked = collectFileInputsNear(el)
     .map((input) => ({
       input,
@@ -101,9 +112,54 @@ export async function resumeUpload(
   file: RuntimeAttachedFile,
   expectedLabel?: string | null,
 ): Promise<string> {
+  const nearby = collectFileInputsNear(el);
+  const doc = el.ownerDocument || document;
+  const allInputs = Array.from(doc.querySelectorAll('input[type="file"]'));
+  let depthFound = -1;
+  let node: Element | null = el;
+  for (let i = 0; i < 20 && node; i += 1) {
+    if (node.querySelector('input[type="file"]')) {
+      depthFound = i;
+      break;
+    }
+    node = node.parentElement;
+  }
+  // #region agent log
+  oakDebugLog('A', 'resume-upload.ts:entry', 'resume upload target', {
+    tag: el.tagName,
+    type: isFileInput(el) ? el.type : '',
+    role: ((el as HTMLElement).getAttribute?.('role') || '').toLowerCase(),
+    nearbyCount: nearby.length,
+    docCount: allInputs.length,
+    depthFound,
+    otherDocLabel: labelLooksLikeOtherDocument(expectedLabel),
+    expectedLabelLen: String(expectedLabel || '').length,
+  });
+  // #endregion
   if (labelLooksLikeOtherDocument(expectedLabel)) {
     throw new Error('Recommended resume can only be attached to a Resume/CV control');
   }
-  const input = resolveResumeFileInput(el, expectedLabel);
-  return uploadFileToElement(input, file);
+  try {
+    const input = resolveResumeFileInput(el, expectedLabel);
+    // #region agent log
+    oakDebugLog('C', 'resume-upload.ts:resolved', 'resume file input resolved', {
+      inputNameLen: String(input.name || '').length,
+      alreadyHasFile: (input.files?.length ?? 0) > 0,
+      usedTarget: input === el,
+      targetKind: isFileInput(el) ? combinedKind(el, el, expectedLabel) : null,
+      expectedKind: documentFieldKind(expectedLabel || ''),
+    });
+    // #endregion
+    return uploadFileToElement(input, file);
+  } catch (err) {
+    // #region agent log
+    oakDebugLog('A', 'resume-upload.ts:resolveFailed', 'resume file input missing', {
+      nearbyCount: nearby.length,
+      docCount: allInputs.length,
+      depthFound,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // #endregion
+    throw err;
+  }
 }

@@ -1,36 +1,59 @@
-export function resolveElementByNodeId(
-  nodeId: number, 
-  root: Document | Element | ShadowRoot = document
-): Element | null {
-  // 1. Fast path: Direct query on the current context
-  if ('querySelector' in root) {
-    const el = root.querySelector(`[data-oak-id="${nodeId}"]`);
-    if (el) return el;
+function isDisplayed(el: Element): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.getClientRects().length === 0) return false;
+  const style = el.ownerDocument?.defaultView?.getComputedStyle(el);
+  if (!style) return Boolean(el.offsetParent);
+  return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+}
+
+function isFormControl(el: Element): boolean {
+  return (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLSelectElement ||
+    el instanceof HTMLTextAreaElement
+  );
+}
+
+/** When the page clones a stamped node, prefer the live form control. */
+function pickOakIdMatch(nodes: Element[]): Element | null {
+  if (!nodes.length) return null;
+  if (nodes.length === 1) return nodes[0];
+  const controls = nodes.filter((el) => isFormControl(el) && isDisplayed(el));
+  if (controls.length === 1) return controls[0];
+  const displayed = nodes.filter(isDisplayed);
+  if (displayed.length === 1) return displayed[0];
+  return controls[0] || displayed[0] || nodes[0];
+}
+
+function collectOakIdMatches(
+  nodeId: number,
+  root: Document | Element | ShadowRoot,
+): Element[] {
+  const found: Element[] = [];
+  if ('querySelectorAll' in root) {
+    found.push(...Array.from(root.querySelectorAll(`[data-oak-id="${nodeId}"]`)));
   }
 
-  // 2. Slow path: Recursively search through Iframes and Shadow DOMs
   const allElements = root.querySelectorAll('*');
-  
   for (const child of Array.from(allElements)) {
-    // Pierce Shadow DOM
     if (child.shadowRoot) {
-      const found = resolveElementByNodeId(nodeId, child.shadowRoot);
-      if (found) return found;
+      found.push(...collectOakIdMatches(nodeId, child.shadowRoot));
     }
-    
-    // Pierce Iframe
     if (child.tagName === 'IFRAME') {
       try {
         const doc = (child as HTMLIFrameElement).contentDocument;
-        if (doc) {
-          const found = resolveElementByNodeId(nodeId, doc);
-          if (found) return found;
-        }
-      } catch (e) {
-        // Ignored: CORS blocked cross-origin iframe
+        if (doc) found.push(...collectOakIdMatches(nodeId, doc));
+      } catch {
+        // CORS blocked cross-origin iframe
       }
     }
   }
+  return found;
+}
 
-  return null;
+export function resolveElementByNodeId(
+  nodeId: number,
+  root: Document | Element | ShadowRoot = document,
+): Element | null {
+  return pickOakIdMatch(collectOakIdMatches(nodeId, root));
 }
